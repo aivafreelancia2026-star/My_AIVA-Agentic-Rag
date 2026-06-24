@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - GraphRAG</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f3f4f6; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .box { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+    h1 { margin-top: 0; color: #111827; }
+    p { color: #6b7280; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    button { background: #07ed41; border: none; color: #111827; font-weight: bold; padding: 0.8rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; width: 100%; transition: background 0.2s; }
+    button:hover { background: #06c537; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>GraphRAG Login</h1>
+    <p>Local development mode. No password required.</p>
+    <button onclick="login()">Enter Chat</button>
+  </div>
+  <script>
+    async function login() {
+      try {
+        const res = await fetch('/api/auth/login', { method: 'POST' });
+        const data = await res.json();
+        sessionStorage.setItem('token', data.access_token);
+        sessionStorage.setItem('session_id', data.session_id);
+        sessionStorage.setItem('role', 'vice_president');
+        sessionStorage.setItem('username', 'Admin');
+        window.location.href = 'chatbot.html';
+      } catch (err) {
+        alert('Login failed: ' + err.message);
+      }
+    }
+  </script>
+</body>
+</html>

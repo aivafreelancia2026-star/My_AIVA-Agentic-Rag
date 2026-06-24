@@ -95,9 +95,9 @@ class RAGConfig:
     EMBED_MODEL = EMBED_MODEL_OPTIONS[1]
 
     # LLM (your existing Ollama config)
-    LLM_MODEL      = os.getenv("LLM_MODEL", "gemma2:9b")
+    LLM_MODEL      = os.getenv("LLM_MODEL", "mistral")
     OLLAMA_BASE_URL= os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
+    OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
 
     # Device
     DEVICE      = OPTIMAL_DEVICE
@@ -216,7 +216,7 @@ class RAGConfig:
         {"id": "openai_gpt4", "name": "GPT-4o",                  "provider": "openai",    "model_name": "gpt-4o"},
         {"id": "claude",      "name": "Claude 3.5 Sonnet",       "provider": "anthropic", "model_name": "claude-sonnet-4-5"},
     ]
-    LLM_DEFAULT = os.getenv("LLM_DEFAULT", "tinyllama")   # tinyllama = your existing default
+    LLM_DEFAULT = os.getenv("LLM_DEFAULT", "mistral")   # mistral = your local model from ollama
 
     # ── NEW V4: RBAC role definitions ─────────────────────────────
     ROLES: Dict[str, Dict] = {
