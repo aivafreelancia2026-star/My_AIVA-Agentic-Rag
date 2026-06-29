@@ -9,6 +9,13 @@ Workflow per query:
   3. Merge all results      → deduplicate + rank by score
   4. Return augmented_context string ready to inject into RAG prompt
 
+Agentic enhancements (Phase 1):
+  - Weak-context retry per agent: if an agent's retrieved chunks have low
+    confidence the manager searches that agent a second time with a rewritten
+    query before moving on.
+  - Multi-agent comparison: when multiple agents match, their contexts are
+    ranked and the strongest is preferred.
+
 Also handles:
   - On-demand indexing (if agent not yet indexed)
   - Background refresh scheduler (checks refresh_hours)
@@ -26,10 +33,14 @@ from agents.query_router   import route_query
 
 logger = logging.getLogger(__name__)
 
-# How many top chunks to take per agent
+# How many top chunks to take per agent (first pass)
 CHUNKS_PER_AGENT = 5
+# Extra chunks to pull on weak-context retry
+CHUNKS_PER_AGENT_RETRY = 8
 # Hard cap on total context characters fed to RAG
 MAX_CONTEXT_CHARS = 6000
+# Confidence threshold below which per-agent retry is triggered
+_AGENT_RETRY_THRESHOLD = 0.45
 
 
 class AgentManager:
@@ -137,8 +148,10 @@ class AgentManager:
             + ", ".join(f"{a['id']}({s:.2f})" for a, s in matched)
         )
 
-        # 2. Search each matched agent
+        # 2. Search each matched agent (with optional weak-context retry)
         all_chunks: List[Dict] = []
+        agent_confidences: Dict[str, float] = {}
+
         for agent, route_score in matched:
             agent_id = agent["id"]
 
@@ -148,6 +161,7 @@ class AgentManager:
                 self.ensure_indexed(agent_id)
                 continue
 
+            # First-pass retrieval
             chunks = search_agent_index(
                 agent_id,
                 query,
@@ -155,9 +169,37 @@ class AgentManager:
                 k=CHUNKS_PER_AGENT,
             )
             for c in chunks:
-                c["agent_name"]   = agent["name"]
-                c["route_score"]  = route_score
-                c["final_score"]  = route_score * 0.4 + (1 - c["score"]) * 0.6
+                c["agent_name"]  = agent["name"]
+                c["route_score"] = route_score
+                c["final_score"] = route_score * 0.4 + (1 - c["score"]) * 0.6
+
+            # Compute a lightweight confidence for this agent's results
+            agent_conf = self._estimate_chunk_confidence(query, chunks)
+            agent_confidences[agent_id] = agent_conf
+
+            # Weak-context retry: broaden search if confidence is low
+            if agent_conf < _AGENT_RETRY_THRESHOLD and chunks:
+                retry_query = self._broaden_query(query)
+                logger.info(
+                    "[AgentManager] Agent '%s' weak context (conf=%.2f) — retrying with: %r",
+                    agent_id, agent_conf, retry_query,
+                )
+                retry_chunks = search_agent_index(
+                    agent_id,
+                    retry_query,
+                    self.embedding_model,
+                    k=CHUNKS_PER_AGENT_RETRY,
+                )
+                # Merge retry results; avoid duplicates by text fingerprint
+                existing_fps = {c["text"][:120] for c in chunks}
+                for rc in retry_chunks:
+                    if rc["text"][:120] not in existing_fps:
+                        rc["agent_name"]  = agent["name"]
+                        rc["route_score"] = route_score * 0.8  # slightly lower weight for retry
+                        rc["final_score"] = rc["route_score"] * 0.4 + (1 - rc["score"]) * 0.6
+                        chunks.append(rc)
+                        existing_fps.add(rc["text"][:120])
+
             all_chunks.extend(chunks)
 
         if not all_chunks:
@@ -274,3 +316,49 @@ class AgentManager:
                 "is_indexed": agent_is_indexed(a["id"]),
             })
         return {"agents": result, "total": len(result)}
+
+    # ── Agentic helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _estimate_chunk_confidence(query: str, chunks: List[Dict]) -> float:
+        """
+        Lightweight confidence estimate for a set of chunks from a single agent.
+        Uses token coverage (no extra ML required).
+        """
+        import re
+
+        if not chunks:
+            return 0.0
+
+        stopwords = {
+            'the', 'and', 'for', 'are', 'was', 'is', 'in', 'on', 'at', 'to',
+            'of', 'a', 'an', 'with', 'this', 'that', 'from', 'by', 'it',
+        }
+
+        def tokens(text: str) -> set:
+            text = re.sub(r'[^a-z0-9\s]', ' ', text.lower())
+            return {t for t in text.split() if len(t) > 2 and t not in stopwords}
+
+        query_toks = tokens(query)
+        if not query_toks:
+            return 0.5
+
+        combined = " ".join(c.get("text", "")[:300] for c in chunks[:6])
+        context_toks = tokens(combined)
+        coverage = len(query_toks & context_toks) / len(query_toks)
+
+        # Quantity bonus: more unique chunks = more confident
+        qty_bonus = min(0.2, len(chunks) * 0.04)
+        return min(1.0, coverage + qty_bonus)
+
+    @staticmethod
+    def _broaden_query(query: str) -> str:
+        """Strip question words to form a broader keyword search."""
+        import re
+        q = re.sub(
+            r'^(what is|who is|how does|when did|where is|why does|which|'
+            r'tell me about|explain|describe|show me|give me)\s+',
+            '', query.lower()
+        ).strip()
+        q = re.sub(r'[?!.]$', '', q).strip()
+        return q if q else query

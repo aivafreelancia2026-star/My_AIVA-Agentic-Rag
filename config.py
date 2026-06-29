@@ -256,6 +256,16 @@ class RAGConfig:
     DOCUMENT_CONTEXT_WEIGHT = 0.7 # Weight for document-based context
     ENTITY_CONTEXT_WEIGHT = 0.3  # Weight for entity-based context
 
+    # ── Agentic RAG settings ──────────────────────────────────────────────────
+    # Set AGENTIC_RAG_ENABLED=false in .env to fall back to single-pass RAG.
+    AGENTIC_RAG_ENABLED     = os.getenv("AGENTIC_RAG_ENABLED", "true").lower() != "false"
+    # Maximum retrieval-evaluate-rewrite iterations per query.
+    MAX_AGENTIC_ITERATIONS  = int(os.getenv("MAX_AGENTIC_ITERATIONS", "3"))
+    # Confidence threshold below which re-retrieval is triggered.
+    MIN_CONTEXT_CONFIDENCE  = float(os.getenv("MIN_CONTEXT_CONFIDENCE", "0.65"))
+    # When true, the agentic trace is attached to every /api/chat response.
+    DEBUG_AGENTIC_TRACE     = os.getenv("DEBUG_AGENTIC_TRACE", "true").lower() != "false"
+
     # System capabilities
     CAPABILITIES = {
         'advanced_tables': HAS_TABULA or HAS_CAMELOT,

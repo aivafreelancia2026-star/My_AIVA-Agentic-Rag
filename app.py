@@ -106,6 +106,10 @@ app.register_blueprint(embedding_bp)
 from routes.agent_routes import agent_bp
 app.register_blueprint(agent_bp)
 
+# Phase 2: File viewing and editing routes
+from routes.file_routes import file_bp
+app.register_blueprint(file_bp)
+
 # -------------------------------------------------------
 # CORS (dev)
 # -------------------------------------------------------

@@ -1817,7 +1817,7 @@ def api_chat():
             followup_force_context
         )
         response = llm.invoke(prompt)
-        full_response_text = response if isinstance(response, str) else str(response)
+        full_response_text = response.content if hasattr(response, 'content') else (response if isinstance(response, str) else str(response))
 
         # Final sanitize for non-stream
         full_response_text = _strip_external_image_links(full_response_text)

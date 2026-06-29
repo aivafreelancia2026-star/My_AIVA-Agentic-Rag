@@ -731,6 +731,7 @@ import json
 import time
 import os
 import re
+import hashlib
 import traceback
 import logging
 from pathlib import Path
@@ -755,6 +756,17 @@ from modules.utils import (
 from modules.auth import require_login
 from app_state import get_system_state
 from config import PAGE_SPECIFIC_TEMPLATE, config as app_config
+
+# Agentic RAG components (imported lazily so missing deps don't crash the app)
+try:
+    from agents.context_evaluator import evaluate_context_quality
+    from agents.query_rewriter import rewrite_query
+    _AGENTIC_AVAILABLE = True
+except Exception as _e:
+    _AGENTIC_AVAILABLE = False
+    logging.getLogger(__name__).warning(
+        "Agentic RAG components unavailable (%s) — falling back to single-pass.", _e
+    )
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/')
 logger = logging.getLogger(__name__)
@@ -1389,6 +1401,137 @@ def _incremental_sanitizer():
 
 
 # ==============
+# Agentic RAG helpers
+# ==============
+
+def _fingerprint(doc) -> str:
+    """Stable content fingerprint for deduplication across iterations."""
+    text = getattr(doc, 'page_content', '') or ''
+    return hashlib.md5(text[:200].encode('utf-8', errors='ignore')).hexdigest()
+
+
+def _merge_deduplicate(existing: list, new_docs: list) -> list:
+    """Merge two result lists, keeping first occurrence of each unique chunk."""
+    seen = {_fingerprint(d) for d in existing}
+    merged = list(existing)
+    for d in new_docs:
+        fp = _fingerprint(d)
+        if fp not in seen:
+            seen.add(fp)
+            merged.append(d)
+    return merged
+
+
+def _agentic_retrieve(
+    user_message: str,
+    doc_manager,
+    context_manager,
+    search_docs_list: list,
+    is_fast: bool,
+) -> tuple:
+    """
+    Agentic retrieval loop: retrieve → evaluate → (rewrite → retrieve again) × N.
+
+    Returns:
+        (accumulated_results, agentic_trace)
+
+        accumulated_results — merged, deduplicated list of LangChain Documents.
+        agentic_trace       — list of per-iteration dicts for the debug panel.
+    """
+    max_iterations  = getattr(app_config, 'MAX_AGENTIC_ITERATIONS', 3)
+    min_confidence  = getattr(app_config, 'MIN_CONTEXT_CONFIDENCE', 0.65)
+    debug           = getattr(app_config, 'DEBUG_AGENTIC_TRACE', True)
+
+    accumulated: list = []
+    agentic_trace: list = []
+    current_query = user_message
+
+    for iteration in range(max_iterations):
+        # ── Retrieve ──────────────────────────────────────────────────────────
+        iter_results, _ = intelligent_document_search(
+            current_query,
+            doc_manager,
+            k=15,
+            fast=is_fast,
+            selected_documents=search_docs_list,
+            context_manager=context_manager,
+        )
+
+        # ── Merge & deduplicate ───────────────────────────────────────────────
+        accumulated = _merge_deduplicate(accumulated, iter_results)
+
+        # ── Evaluate ──────────────────────────────────────────────────────────
+        if _AGENTIC_AVAILABLE:
+            evaluation = evaluate_context_quality(
+                user_message,
+                accumulated,
+                iteration=iteration,
+                min_confidence=min_confidence,
+            )
+        else:
+            # Fallback: assume sufficient if we got enough chunks
+            sufficient = len(accumulated) >= 3
+            evaluation = {
+                "sufficient":   sufficient,
+                "confidence":   0.7 if sufficient else 0.3,
+                "reason":       "Agentic evaluator not available; using chunk-count heuristic.",
+                "missing_information":      [],
+                "recommended_next_queries": [],
+                "should_retry": not sufficient,
+                "chunk_count":  len(accumulated),
+                "coverage_score": 0.5,
+                "duplicate_ratio": 0.0,
+            }
+
+        trace_entry = {
+            "iteration":        iteration + 1,
+            "query_used":       current_query,
+            "chunks_retrieved": len(iter_results),
+            "total_chunks":     len(accumulated),
+            "evaluation":       evaluation,
+        }
+        agentic_trace.append(trace_entry)
+
+        if debug:
+            logger.info(
+                "[Agentic] iter=%d  query=%r  chunks=%d  confident=%s  conf=%.2f  reason=%s",
+                iteration + 1, current_query, len(accumulated),
+                evaluation["sufficient"], evaluation["confidence"],
+                evaluation["reason"]
+            )
+
+        # ── Decision ──────────────────────────────────────────────────────────
+        if evaluation["sufficient"]:
+            break
+
+        if not evaluation.get("should_retry", False) or iteration == max_iterations - 1:
+            break
+
+        # ── Rewrite ───────────────────────────────────────────────────────────
+        if _AGENTIC_AVAILABLE:
+            rewritten = rewrite_query(
+                user_message,
+                context_manager=context_manager,
+                evaluation=evaluation,
+                iteration=iteration,
+            )
+            current_query = rewritten["rewritten_query"]
+            trace_entry["rewritten_to"] = current_query
+            trace_entry["rewrite_strategy"] = rewritten.get("search_strategy", "semantic")
+
+            if debug:
+                logger.info(
+                    "[Agentic] Rewriting query → %r  strategy=%s  reason=%s",
+                    current_query, rewritten.get("search_strategy"), rewritten.get("reasoning")
+                )
+        else:
+            # Can't rewrite — no point in another identical retrieval
+            break
+
+    return accumulated, agentic_trace
+
+
+# ==============
 # Notebook Chat
 # ==============
 
@@ -1491,7 +1634,7 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
     # Non-streaming
     try:
         response = llm.invoke(prompt)
-        text = _strip_external_image_links(response if isinstance(response, str) else str(response))
+        text = _strip_external_image_links(response.content if hasattr(response, 'content') else (response if isinstance(response, str) else str(response)))
     except Exception as e:
         err_msg = _friendly_llm_error(e)
         return jsonify({'error': err_msg, 'message': err_msg}), 502
@@ -1686,21 +1829,39 @@ def api_chat():
                     )
 
                     is_fast = len(user_message.split()) <= 6
-                    CONTEXT_K = 15
 
-                    search_results, _ = intelligent_document_search(
-                        user_message,
-                        doc_manager,
-                        k=CONTEXT_K,
-                        fast=is_fast,
-                        selected_documents=search_docs_list,
-                        context_manager=context_manager
+                    # ── Agentic or single-pass retrieval ──────────────────────
+                    agentic_enabled = (
+                        _AGENTIC_AVAILABLE
+                        and getattr(app_config, 'AGENTIC_RAG_ENABLED', True)
                     )
+                    if agentic_enabled:
+                        yield f"data: {json.dumps({'type': 'status', 'message': 'agentic retrieval started'})}\n\n"
+                        search_results, agentic_trace = _agentic_retrieve(
+                            user_message, doc_manager, context_manager,
+                            search_docs_list, is_fast
+                        )
+                        # Notify UI of iteration count
+                        n_iters = len(agentic_trace)
+                        if n_iters > 1:
+                            yield f"data: {json.dumps({'type': 'status', 'message': f'agentic: {n_iters} retrieval iterations'})}\n\n"
+                    else:
+                        search_results, _ = intelligent_document_search(
+                            user_message, doc_manager, k=15, fast=is_fast,
+                            selected_documents=search_docs_list,
+                            context_manager=context_manager
+                        )
+                        agentic_trace = []
 
                     if not search_results:
                         msg = "No relevant information found in the loaded documents."
                         yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
-                        yield f"data: {json.dumps({'type': 'done', 'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': []})}\n\n"
+                        done_empty = {
+                            'type': 'done', 'sources': [], 'processing_time': 0.0,
+                            'images': [], 'blocks': [],
+                            'agentic_trace': agentic_trace,
+                        }
+                        yield f"data: {json.dumps(done_empty)}\n\n"
                         return
 
                     # 🔹 Use only high-relevance results as the "primary" context
@@ -1772,19 +1933,22 @@ def api_chat():
 
                     blocks = _build_blocks(full_response_text, images)
                     total_time = round(time.time() - start_time, 2)
+                    debug_trace = getattr(app_config, 'DEBUG_AGENTIC_TRACE', True)
                     done_message = {
                         'type': 'done',
                         'sources': formatted_sources,
                         'processing_time': total_time,
                         'images': images,
-                        'blocks': blocks
+                        'blocks': blocks,
+                        'agentic_trace': agentic_trace if debug_trace else [],
+                        'retrieval_mode': 'agentic' if agentic_trace else 'single-pass',
                     }
                     yield f"data: {json.dumps(done_message)}\n\n"
 
                 except Exception as e:
                     logger.error(f"Streaming error: {e}\n{traceback.format_exc()}")
                     yield f"data: {json.dumps({'type': 'error', 'message': _friendly_llm_error(e)})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': []})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': [], 'agentic_trace': []})}\n\n"
 
             headers = {
                 'Cache-Control': 'no-cache, no-transform',
@@ -1823,15 +1987,24 @@ def api_chat():
         )
 
         is_fast = len(user_message.split()) <= 6
-        CONTEXT_K_NONSTREAM = 15
-        search_results, _ = intelligent_document_search(
-            user_message,
-            doc_manager,
-            k=CONTEXT_K_NONSTREAM,
-            fast=is_fast,
-            selected_documents=search_docs_list,
-            context_manager=context_manager
+
+        # ── Agentic or single-pass retrieval ──────────────────────────────────
+        agentic_enabled = (
+            _AGENTIC_AVAILABLE
+            and getattr(app_config, 'AGENTIC_RAG_ENABLED', True)
         )
+        if agentic_enabled:
+            search_results, agentic_trace = _agentic_retrieve(
+                user_message, doc_manager, context_manager,
+                search_docs_list, is_fast
+            )
+        else:
+            search_results, _ = intelligent_document_search(
+                user_message, doc_manager, k=15, fast=is_fast,
+                selected_documents=search_docs_list,
+                context_manager=context_manager
+            )
+            agentic_trace = []
 
         if not search_results:
             msg = "No relevant information found in the loaded documents."
@@ -1841,7 +2014,8 @@ def api_chat():
                 'sources': [],
                 'processing_time': 0.0,
                 'images': [],
-                'blocks': [{"type": "text", "content": msg}]
+                'blocks': [{"type": "text", "content": msg}],
+                'agentic_trace': agentic_trace,
             })
 
         # 🔹 High-relevance subset for non-stream too
@@ -1871,7 +2045,7 @@ def api_chat():
             followup_force_context
         )
         response = llm.invoke(prompt)
-        full_response_text = response if isinstance(response, str) else str(response)
+        full_response_text = response.content if hasattr(response, 'content') else (response if isinstance(response, str) else str(response))
 
         # Final sanitize for non-stream
         full_response_text = _strip_external_image_links(full_response_text)
@@ -1897,6 +2071,7 @@ def api_chat():
         )
 
         blocks = _build_blocks(full_response_text, images)
+        debug_trace = getattr(app_config, 'DEBUG_AGENTIC_TRACE', True)
 
         return jsonify({
             'response': full_response_text,
@@ -1904,7 +2079,9 @@ def api_chat():
             'sources': formatted_sources,
             'processing_time': round(processing_time, 2),
             'images': images,
-            'blocks': blocks
+            'blocks': blocks,
+            'agentic_trace': agentic_trace if debug_trace else [],
+            'retrieval_mode': 'agentic' if agentic_trace else 'single-pass',
         })
 
     except Exception as e:

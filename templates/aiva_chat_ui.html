@@ -627,6 +627,16 @@
     <div class="threads-list" id="threadsList">
       <div class="thread-empty" id="emptyThreads">No previous chats</div>
     </div>
+
+    <!-- File Library button at the bottom of sidebar -->
+    <div style="padding:12px 16px 16px;border-top:1px solid var(--border);margin-top:auto;">
+      <button onclick="openFileLibrary()"
+              style="width:100%;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text-2);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all .2s;"
+              onmouseover="this.style.color='var(--text-1)';this.style.borderColor='var(--border-hi)'"
+              onmouseout="this.style.color='var(--text-2)';this.style.borderColor='var(--border)'">
+        📁 File Library
+      </button>
+    </div>
   </aside>
 
   <!-- ── Main ── -->
@@ -1014,6 +1024,11 @@ async function sendMessage() {
     chats[currentChatId].messages.push({ role: "ai", content: aiText });
     renderThreads();
 
+    // ── Agentic trace (debug panel) ───────────────────────────
+    if (data.agentic_trace && data.agentic_trace.length) {
+      showAgenticTrace(data.agentic_trace, data.retrieval_mode || "agentic");
+    }
+
   } catch (err) {
     hideTyping();
     const errMsg = `⚠️ Error: ${err.message}`;
@@ -1027,8 +1042,651 @@ async function sendMessage() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ── Agentic Debug Panel ───────────────────────────────────────
+function showAgenticTrace(trace, mode) {
+  const panel = document.getElementById("agenticDebugPanel");
+  if (!panel) return;
+
+  const badge = mode === "agentic" ? "🔄 Agentic" : "⚡ Single-pass";
+  const iterations = trace.length;
+  const finalEval = trace[trace.length - 1]?.evaluation || {};
+  const confidence = ((finalEval.confidence || 0) * 100).toFixed(0);
+  const sufficient = finalEval.sufficient ? "✅ Sufficient" : "⚠️ Insufficient";
+
+  let rows = trace.map((t, i) => {
+    const ev = t.evaluation || {};
+    const conf = ((ev.confidence || 0) * 100).toFixed(0);
+    const cov  = ((ev.coverage_score || 0) * 100).toFixed(0);
+    const rewrite = t.rewritten_to ? `<br/><span style="color:var(--cyan);font-size:10.5px;">↳ Rewritten: "${t.rewritten_to}"</span>` : "";
+    return `
+      <div class="atr-row">
+        <div class="atr-iter">Iter ${i + 1}</div>
+        <div class="atr-detail">
+          <b style="color:var(--text-1)">${escHtml(t.query_used)}</b>${rewrite}
+          <br/><span style="color:var(--text-2);font-size:10.5px;">
+            Chunks retrieved: ${t.chunks_retrieved} | Total: ${t.total_chunks} |
+            Confidence: ${conf}% | Coverage: ${cov}%
+          </span>
+          <br/><span style="color:var(--text-2);font-size:10px;font-style:italic;">${escHtml(ev.reason || "")}</span>
+        </div>
+        <div class="atr-badge ${ev.sufficient ? 'ok' : 'warn'}">${ev.sufficient ? "✓ OK" : "↻ Retry"}</div>
+      </div>`;
+  }).join("");
+
+  panel.querySelector(".atr-header-text").innerHTML =
+    `${badge} &nbsp;·&nbsp; ${iterations} iteration${iterations > 1 ? "s" : ""} &nbsp;·&nbsp; ${sufficient} &nbsp;·&nbsp; Confidence: ${confidence}%`;
+  panel.querySelector(".atr-body").innerHTML = rows;
+  panel.style.display = "block";
+}
+
+function toggleAgenticPanel() {
+  const body = document.querySelector("#agenticDebugPanel .atr-body");
+  const arrow = document.getElementById("atrToggleArrow");
+  if (!body) return;
+  const hidden = body.style.display === "none";
+  body.style.display = hidden ? "block" : "none";
+  if (arrow) arrow.textContent = hidden ? "▲" : "▼";
+}
+
 // ── Init ──────────────────────────────────────────────────────
 newChat();
 </script>
+
+<!-- ── File Library Modal ──────────────────────────────────── -->
+<style>
+  .fl-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.65); z-index: 10000;
+    align-items: flex-start; justify-content: center; padding-top: 40px;
+  }
+  .fl-overlay.open { display: flex; }
+  .fl-modal {
+    width: min(92vw, 1020px); max-height: 86vh;
+    background: #0b1628; border: 1px solid rgba(7,237,65,0.2);
+    border-radius: 16px; display: flex; flex-direction: column;
+    overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+    font-family: 'Inter', sans-serif; font-size: 13px; color: #dde6f4;
+  }
+  .fl-header {
+    padding: 14px 20px; display: flex; align-items: center;
+    justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(7,237,65,0.04);
+  }
+  .fl-title { font-weight: 600; font-size: 14px; color: #07ed41; }
+  .fl-close { cursor: pointer; color: #6b7a99; font-size: 18px; line-height: 1; }
+  .fl-close:hover { color: #dde6f4; }
+  .fl-body { display: flex; flex: 1; overflow: hidden; }
+  .fl-list {
+    width: 300px; min-width: 220px; overflow-y: auto;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 0;
+  }
+  .fl-file-row {
+    padding: 8px 16px; cursor: pointer; display: flex;
+    flex-direction: column; gap: 2px; border-bottom: 1px solid rgba(255,255,255,0.03);
+    transition: background .15s;
+  }
+  .fl-file-row:hover { background: rgba(255,255,255,0.04); }
+  .fl-file-row.active { background: rgba(7,237,65,0.07); }
+  .fl-file-name { font-weight: 500; color: #dde6f4; font-size: 12.5px; word-break: break-all; }
+  .fl-file-meta { font-size: 10.5px; color: #6b7a99; }
+  .fl-badge {
+    display: inline-block; font-size: 9.5px; font-weight: 600;
+    padding: 1px 5px; border-radius: 4px; margin-left: 4px;
+  }
+  .fl-badge.edit { background: rgba(7,237,65,0.12); color: #07ed41; }
+  .fl-badge.view { background: rgba(75,110,245,0.12); color: #4B6EF5; }
+  .fl-content {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .fl-toolbar {
+    padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: rgba(255,255,255,0.02);
+  }
+  .fl-btn {
+    padding: 5px 12px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.06); color: #dde6f4; font-size: 11.5px;
+    cursor: pointer; transition: all .15s;
+  }
+  .fl-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(7,237,65,0.3); }
+  .fl-btn.primary { background: rgba(7,237,65,0.1); border-color: rgba(7,237,65,0.3); color: #07ed41; }
+  .fl-btn.danger  { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.2); color: #f87171; }
+  .fl-viewer { flex: 1; overflow: auto; padding: 16px; }
+  .fl-viewer pre {
+    white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
+    color: #c8d3e8; line-height: 1.6; font-family: 'Fira Mono', monospace;
+  }
+  .fl-editor textarea {
+    width: 100%; height: 100%; min-height: 340px;
+    background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; color: #dde6f4; font-size: 12.5px; padding: 12px;
+    font-family: 'Fira Mono', monospace; line-height: 1.6; resize: vertical;
+  }
+  .fl-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .fl-table th, .fl-table td {
+    padding: 5px 10px; border: 1px solid rgba(255,255,255,0.06);
+    text-align: left; vertical-align: top;
+  }
+  .fl-table th { background: rgba(255,255,255,0.04); color: #6b7a99; }
+  .fl-msg {
+    padding: 12px 16px; margin: 10px 0; border-radius: 8px; font-size: 12px;
+  }
+  .fl-msg.ok   { background: rgba(7,237,65,0.07); color: #07ed41; border: 1px solid rgba(7,237,65,0.2); }
+  .fl-msg.err  { background: rgba(239,68,68,0.07); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+  .fl-msg.info { background: rgba(75,110,245,0.07); color: #93b4fd; border: 1px solid rgba(75,110,245,0.2); }
+  .fl-sheet-tabs { display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .fl-sheet-tab {
+    padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 11.5px;
+    border: 1px solid rgba(255,255,255,0.1); color: #6b7a99;
+  }
+  .fl-sheet-tab.active { background: rgba(7,237,65,0.1); border-color: rgba(7,237,65,0.3); color: #07ed41; }
+  .fl-empty { color: #6b7a99; font-size: 12px; padding: 20px; text-align: center; }
+  .fl-diff { background: rgba(0,0,0,0.5); border-radius: 8px; padding: 12px; overflow: auto; max-height: 260px; }
+  .fl-diff pre { font-size: 11.5px; color: #c8d3e8; line-height: 1.5; }
+  .fl-diff .added   { color: #4ade80; }
+  .fl-diff .removed { color: #f87171; }
+  .fl-ai-row { display: flex; gap: 8px; align-items: center; }
+  .fl-ai-row input {
+    flex: 1; padding: 6px 10px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.35);
+    color: #dde6f4; font-size: 12px;
+  }
+</style>
+
+<div class="fl-overlay" id="fileLibraryOverlay" onclick="if(event.target===this)closeFileLibrary()">
+  <div class="fl-modal">
+    <div class="fl-header">
+      <span class="fl-title">📁 File Library</span>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <span id="flStatus" style="font-size:11px;color:#6b7a99;"></span>
+        <span class="fl-close" onclick="closeFileLibrary()">✕</span>
+      </div>
+    </div>
+    <div class="fl-body">
+      <!-- File list -->
+      <div class="fl-list" id="flFileList">
+        <div class="fl-empty">Loading…</div>
+      </div>
+      <!-- Content area -->
+      <div class="fl-content">
+        <div class="fl-toolbar" id="flToolbar" style="display:none;">
+          <span id="flFileName" style="flex:1;font-weight:600;font-size:12.5px;color:#dde6f4;word-break:break-all;"></span>
+          <button class="fl-btn" onclick="flView()">👁 View</button>
+          <button class="fl-btn" id="flEditBtn" onclick="flEdit()">✏️ Edit</button>
+          <button class="fl-btn primary" id="flSaveBtn" onclick="flSave(false)" style="display:none;">💾 Save (preview)</button>
+          <button class="fl-btn primary" id="flSaveConfirmBtn" onclick="flSave(true)" style="display:none;">✅ Confirm Save</button>
+          <button class="fl-btn" onclick="flReindex()">🔄 Re-index</button>
+          <button class="fl-btn" onclick="flAskRAG()">💬 Ask RAG</button>
+        </div>
+        <!-- AI edit bar -->
+        <div id="flAIBar" style="display:none;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(7,237,65,0.02);">
+          <div class="fl-ai-row">
+            <input id="flAIInstruction" type="text" placeholder="Describe the edit (e.g. 'Replace Company A with Company B throughout')"/>
+            <button class="fl-btn primary" onclick="flAIEdit(false)">🤖 Propose</button>
+            <button class="fl-btn" onclick="flAIBar(false)">✕</button>
+          </div>
+          <div id="flDiffBox" style="display:none;margin-top:8px;"></div>
+        </div>
+        <!-- Sheet tabs (xlsx) -->
+        <div id="flSheetTabs" class="fl-sheet-tabs" style="display:none;"></div>
+        <!-- Message -->
+        <div id="flMsg" style="display:none;" class="fl-msg"></div>
+        <!-- Viewer / editor -->
+        <div class="fl-viewer" id="flViewer">
+          <div class="fl-empty">Select a file from the list to view or edit it.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── File Library globals ──────────────────────────────────────
+let flSelectedFile = null;
+let flMode = 'view';   // 'view' | 'edit'
+let flCurrentSheet = null;
+let flXlsxData = null;
+let flDocxParagraphs = null;
+let flPendingContent = null;  // content waiting for save confirmation
+
+function openFileLibrary() {
+  document.getElementById('fileLibraryOverlay').classList.add('open');
+  flLoadFiles();
+}
+function closeFileLibrary() {
+  document.getElementById('fileLibraryOverlay').classList.remove('open');
+}
+
+// ── Load file list ────────────────────────────────────────────
+async function flLoadFiles() {
+  const list = document.getElementById('flFileList');
+  list.innerHTML = '<div class="fl-empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/files');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (!data.files || !data.files.length) {
+      list.innerHTML = '<div class="fl-empty">No documents found.</div>';
+      return;
+    }
+    list.innerHTML = data.files.map(f => {
+      const badge = f.is_editable
+        ? '<span class="fl-badge edit">editable</span>'
+        : '<span class="fl-badge view">view only</span>';
+      const sizeKB = (f.size_bytes / 1024).toFixed(1);
+      const mod = new Date(f.modified * 1000).toLocaleDateString();
+      return `<div class="fl-file-row" onclick="flSelectFile(${JSON.stringify(JSON.stringify(f))})" id="flrow-${CSS.escape(f.path)}">
+        <div class="fl-file-name">${escHtml(f.name)}${badge}</div>
+        <div class="fl-file-meta">${escHtml(f.suffix.toUpperCase())} · ${sizeKB} KB · ${mod}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = `<div class="fl-empty" style="color:#f87171">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function flSelectFile(jsonStr) {
+  flSelectedFile = JSON.parse(jsonStr);
+  flMode = 'view';
+  flPendingContent = null;
+
+  // Highlight active row
+  document.querySelectorAll('.fl-file-row').forEach(r => r.classList.remove('active'));
+  const row = document.getElementById('flrow-' + CSS.escape(flSelectedFile.path));
+  if (row) row.classList.add('active');
+
+  // Show toolbar
+  document.getElementById('flToolbar').style.display = 'flex';
+  document.getElementById('flFileName').textContent = flSelectedFile.name;
+  document.getElementById('flEditBtn').style.display = flSelectedFile.is_editable ? '' : 'none';
+  document.getElementById('flSaveBtn').style.display = 'none';
+  document.getElementById('flSaveConfirmBtn').style.display = 'none';
+  document.getElementById('flAIBar').style.display = 'none';
+  document.getElementById('flMsg').style.display = 'none';
+  document.getElementById('flSheetTabs').style.display = 'none';
+  flView();
+}
+
+// ── View ──────────────────────────────────────────────────────
+async function flView() {
+  flMode = 'view';
+  document.getElementById('flSaveBtn').style.display = 'none';
+  document.getElementById('flSaveConfirmBtn').style.display = 'none';
+  flSetStatus('Loading…');
+  const viewer = document.getElementById('flViewer');
+  viewer.innerHTML = '<div class="fl-empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/files/read?path=' + encodeURIComponent(flSelectedFile.path));
+    const data = await r.json();
+    if (data.error) { viewer.innerHTML = `<div class="fl-empty" style="color:#f87171">${escHtml(data.error)}</div>`; flSetStatus(''); return; }
+
+    if (data.type === 'text') {
+      viewer.innerHTML = `<pre>${escHtml(data.content)}</pre>`;
+    } else if (data.type === 'csv') {
+      viewer.innerHTML = flRenderTable(data.rows);
+    } else if (data.type === 'docx') {
+      const rows = data.paragraphs.map(p => [p.style, p.text]);
+      viewer.innerHTML = `<b style="color:#6b7a99;font-size:11px">Paragraphs (style · text):</b>` + flRenderTable(rows);
+      const tbls = (data.tables || []).map((t,i) =>
+        `<div style="margin-top:12px;color:#6b7a99;font-size:11px">Table ${i+1}:</div>` + flRenderTable(t)
+      ).join('');
+      if (tbls) viewer.innerHTML += tbls;
+    } else if (data.type === 'xlsx') {
+      flXlsxData = data;
+      flCurrentSheet = data.sheet_names[0];
+      flRenderSheetTabs(data.sheet_names);
+      flRenderSheet(data.sheets[flCurrentSheet]);
+      flSetStatus(''); return;
+    } else if (data.type === 'pdf') {
+      viewer.innerHTML = data.pages.map(p =>
+        `<div style="margin-bottom:14px;"><b style="color:#6b7a99;font-size:11px">Page ${p.page}:</b><pre>${escHtml(p.text)}</pre></div>`
+      ).join('') || '<div class="fl-empty">No text extracted.</div>';
+    } else if (data.type === 'image') {
+      viewer.innerHTML = `<img src="/embedding/${encodeURIComponent(data.path)}" style="max-width:100%;border-radius:8px;" onerror="this.alt='Image preview unavailable';this.style='opacity:0.4'"/>`;
+    }
+    flSetStatus('');
+  } catch(e) {
+    viewer.innerHTML = `<div class="fl-empty" style="color:#f87171">Error: ${escHtml(e.message)}</div>`;
+    flSetStatus('');
+  }
+}
+
+function flRenderTable(rows) {
+  if (!rows || !rows.length) return '<div class="fl-empty">Empty table</div>';
+  const header = rows[0];
+  const body = rows.slice(1);
+  return `<table class="fl-table"><thead><tr>${header.map(h=>`<th>${escHtml(String(h))}</th>`).join('')}</tr></thead>
+  <tbody>${body.map(r=>`<tr>${r.map(c=>`<td>${escHtml(String(c??''))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function flRenderSheetTabs(names) {
+  const tabs = document.getElementById('flSheetTabs');
+  tabs.style.display = 'flex';
+  tabs.innerHTML = names.map(n =>
+    `<div class="fl-sheet-tab ${n===flCurrentSheet?'active':''}" onclick="flSwitchSheet('${escHtml(n)}')">${escHtml(n)}</div>`
+  ).join('');
+}
+
+function flSwitchSheet(name) {
+  flCurrentSheet = name;
+  if (flXlsxData) {
+    flRenderSheetTabs(flXlsxData.sheet_names);
+    flRenderSheet(flXlsxData.sheets[name]);
+  }
+}
+
+function flRenderSheet(rows) {
+  const viewer = document.getElementById('flViewer');
+  viewer.innerHTML = flRenderTable(rows || []);
+}
+
+// ── Edit ──────────────────────────────────────────────────────
+async function flEdit() {
+  if (!flSelectedFile || !flSelectedFile.is_editable) return;
+  flMode = 'edit';
+  document.getElementById('flSaveBtn').style.display = '';
+  document.getElementById('flSaveConfirmBtn').style.display = 'none';
+  flSetStatus('Loading for edit…');
+
+  const viewer = document.getElementById('flViewer');
+  viewer.innerHTML = '<div class="fl-empty">Loading…</div>';
+
+  try {
+    const r = await fetch('/api/files/read?path=' + encodeURIComponent(flSelectedFile.path));
+    const data = await r.json();
+    if (data.error) { viewer.innerHTML = `<div class="fl-empty" style="color:#f87171">${escHtml(data.error)}</div>`; flSetStatus(''); return; }
+
+    const suffix = flSelectedFile.suffix.toLowerCase();
+
+    if (['.txt', '.md'].includes(suffix)) {
+      viewer.innerHTML = `<div class="fl-editor"><textarea id="flTextArea">${escHtml(data.content || '')}</textarea></div>`;
+    } else if (suffix === '.csv') {
+      viewer.innerHTML = '<div class="fl-empty">CSV editing: modify the table then save. (Raw editor below)</div>'
+        + `<div class="fl-editor" style="margin-top:8px;"><textarea id="flTextArea" style="height:300px">${escHtml((data.rows||[]).map(r=>r.join(',')).join('\n'))}</textarea></div>`;
+    } else if (suffix === '.docx') {
+      flDocxParagraphs = data.paragraphs || [];
+      viewer.innerHTML = `<div class="fl-empty" style="color:#f59e0b">⚠️ DOCX editing: only paragraph text is editable. Formatting/images preserved in original.</div>`
+        + flDocxParagraphs.map((p, i) =>
+          `<div style="margin-bottom:6px;"><span style="font-size:10px;color:#6b7a99">[${escHtml(p.style)}]</span>
+          <input data-para="${i}" value="${escHtml(p.text)}" style="width:100%;padding:5px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#dde6f4;font-size:12px;margin-top:2px;"/></div>`
+        ).join('');
+    } else if (suffix === '.xlsx') {
+      flXlsxData = data;
+      flCurrentSheet = data.sheet_names[0];
+      flRenderSheetTabs(data.sheet_names);
+      viewer.innerHTML = '<div class="fl-empty" style="color:#f59e0b">⚠️ XLSX editing: cell values only. Formulas/styles may be simplified.</div>'
+        + '<div id="flXlsxEditArea">' + flRenderEditableTable(data.sheets[flCurrentSheet]) + '</div>';
+    }
+
+    // Show AI edit bar for text files
+    if (['.txt', '.md'].includes(suffix)) {
+      document.getElementById('flAIBar').style.display = '';
+    }
+
+    flSetStatus('Editing — click Save (preview) when ready.');
+  } catch(e) {
+    viewer.innerHTML = `<div class="fl-empty" style="color:#f87171">Error: ${escHtml(e.message)}</div>`;
+    flSetStatus('');
+  }
+}
+
+function flRenderEditableTable(rows) {
+  if (!rows || !rows.length) return '<div class="fl-empty">Empty sheet</div>';
+  return `<table class="fl-table">
+    ${rows.map((row, ri) => `<tr>${row.map((cell, ci) =>
+      `<td><input data-row="${ri}" data-col="${ci}" value="${escHtml(String(cell??''))}" style="width:100%;background:transparent;border:none;color:#dde6f4;font-size:11.5px;padding:2px;"/></td>`
+    ).join('')}</tr>`).join('')}
+  </table>`;
+}
+
+// ── Save ──────────────────────────────────────────────────────
+async function flSave(confirmed) {
+  if (!flSelectedFile) return;
+  const suffix = flSelectedFile.suffix.toLowerCase();
+  flSetMsg('Saving…', 'info');
+  flSetStatus('Saving…');
+
+  let body = { path: flSelectedFile.path, confirmed };
+  let endpoint = '';
+
+  try {
+    if (['.txt', '.md'].includes(suffix)) {
+      const ta = document.getElementById('flTextArea');
+      body.content = ta ? ta.value : (flPendingContent || '');
+      endpoint = '/api/files/save-text';
+    } else if (suffix === '.csv') {
+      const ta = document.getElementById('flTextArea');
+      if (ta) {
+        const rows = ta.value.split('\n').map(l => l.split(','));
+        body.rows = rows;
+      }
+      endpoint = '/api/files/save-csv';
+    } else if (suffix === '.docx') {
+      const inputs = document.querySelectorAll('[data-para]');
+      body.paragraphs = Array.from(inputs).map((inp, i) => ({
+        text: inp.value,
+        style: (flDocxParagraphs[i] || {}).style || 'Normal'
+      }));
+      body.save_as_new_version = true;
+      endpoint = '/api/files/save-docx';
+    } else if (suffix === '.xlsx') {
+      const inputs = document.querySelectorAll('[data-row]');
+      const rows = {};
+      inputs.forEach(inp => {
+        const r = +inp.dataset.row, c = +inp.dataset.col;
+        if (!rows[r]) rows[r] = [];
+        rows[r][c] = inp.value;
+      });
+      const sortedRows = Object.keys(rows).sort((a,b)=>+a-+b).map(r=>rows[r]);
+      body.rows = sortedRows;
+      body.sheet_name = flCurrentSheet;
+      body.save_as_new_version = true;
+      endpoint = '/api/files/save-xlsx';
+    }
+
+    if (!endpoint) { flSetMsg('Unsupported file type for saving.', 'err'); return; }
+
+    const r = await fetch(endpoint, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+
+    if (data.pending_confirmation) {
+      flPendingContent = body.content;
+      document.getElementById('flSaveBtn').style.display = 'none';
+      document.getElementById('flSaveConfirmBtn').style.display = '';
+      if (data.diff) {
+        flSetMsg('Preview diff shown below. Click "Confirm Save" to write the file.', 'info');
+        showDiff(data.diff);
+      } else {
+        flSetMsg('Preview ready. Click "Confirm Save" to write the file.', 'info');
+      }
+    } else if (data.success) {
+      flSetMsg(`✅ Saved: ${data.saved_to || ''}${data.backup ? ' | Backup: ' + data.backup : ''}`, 'ok');
+      document.getElementById('flSaveBtn').style.display = '';
+      document.getElementById('flSaveConfirmBtn').style.display = 'none';
+      document.getElementById('flDiffBox').style.display = 'none';
+    } else {
+      flSetMsg('❌ ' + (data.error || 'Save failed.'), 'err');
+    }
+    flSetStatus('');
+  } catch(e) {
+    flSetMsg('Error: ' + e.message, 'err');
+    flSetStatus('');
+  }
+}
+
+function showDiff(diff) {
+  const box = document.getElementById('flDiffBox');
+  box.style.display = '';
+  const lines = diff.split('\n').map(l => {
+    if (l.startsWith('+') && !l.startsWith('+++')) return `<span class="added">${escHtml(l)}</span>`;
+    if (l.startsWith('-') && !l.startsWith('---')) return `<span class="removed">${escHtml(l)}</span>`;
+    return escHtml(l);
+  });
+  box.innerHTML = `<div class="fl-diff"><pre>${lines.join('\n')}</pre></div>`;
+}
+
+// ── Re-index ──────────────────────────────────────────────────
+async function flReindex() {
+  if (!flSelectedFile) return;
+  flSetMsg('Re-indexing… this may take a moment.', 'info');
+  flSetStatus('Re-indexing…');
+  try {
+    const r = await fetch('/api/files/reindex', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ path: flSelectedFile.path })
+    });
+    const data = await r.json();
+    if (data.success) flSetMsg('✅ ' + (data.message || 'Re-indexed successfully.'), 'ok');
+    else flSetMsg('❌ ' + (data.error || 'Re-index failed.'), 'err');
+  } catch(e) {
+    flSetMsg('Error: ' + e.message, 'err');
+  }
+  flSetStatus('');
+}
+
+// ── Ask RAG ───────────────────────────────────────────────────
+function flAskRAG() {
+  if (!flSelectedFile) return;
+  closeFileLibrary();
+  const input = document.getElementById('inputField');
+  if (input) {
+    input.value = `Tell me about the document "${flSelectedFile.name}"`;
+    input.focus();
+    autoResize(input);
+  }
+}
+
+// ── AI edit ───────────────────────────────────────────────────
+function flAIBar(show) {
+  document.getElementById('flAIBar').style.display = show === false ? 'none' : '';
+}
+
+async function flAIEdit(confirmed) {
+  const instr = document.getElementById('flAIInstruction').value.trim();
+  if (!instr) { flSetMsg('Please enter an instruction.', 'err'); return; }
+  flSetMsg('Asking AI…', 'info');
+  flSetStatus('AI editing…');
+  try {
+    const body = { path: flSelectedFile.path, instruction: instr, confirmed };
+    if (confirmed && flPendingContent) body.proposed_content = flPendingContent;
+    const r = await fetch('/api/files/ai-edit', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (data.pending_confirmation) {
+      flPendingContent = data.proposed_content;
+      document.getElementById('flSaveConfirmBtn').style.display = '';
+      document.getElementById('flSaveBtn').style.display = 'none';
+      if (data.diff) showDiff(data.diff);
+      flSetMsg('AI proposed edit ready. Click "Confirm Save" to apply.', 'info');
+    } else if (data.success) {
+      flSetMsg('✅ AI edit saved: ' + (data.saved_to || ''), 'ok');
+      flView();
+    } else {
+      flSetMsg('❌ ' + (data.error || 'AI edit failed.'), 'err');
+    }
+  } catch(e) {
+    flSetMsg('Error: ' + e.message, 'err');
+  }
+  flSetStatus('');
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function flSetMsg(text, type) {
+  const el = document.getElementById('flMsg');
+  el.className = 'fl-msg ' + type;
+  el.textContent = text;
+  el.style.display = text ? '' : 'none';
+}
+function flSetStatus(text) {
+  document.getElementById('flStatus').textContent = text;
+}
+</script>
+
+<!-- ── Agentic Debug Panel ─────────────────────────────────── -->
+<style>
+  #agenticDebugPanel {
+    display: none;
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    width: 420px;
+    max-height: 420px;
+    background: rgba(6,13,26,0.96);
+    border: 1px solid rgba(7,237,65,0.25);
+    border-radius: 12px;
+    font-family: 'Inter', monospace;
+    font-size: 11.5px;
+    color: var(--text-2);
+    z-index: 9999;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    overflow: hidden;
+  }
+  .atr-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    background: rgba(7,237,65,0.07);
+    border-bottom: 1px solid rgba(7,237,65,0.15);
+    cursor: pointer;
+    user-select: none;
+  }
+  .atr-header-text { color: var(--cyan); font-size: 11px; font-weight: 600; }
+  .atr-header-actions { display: flex; gap: 10px; align-items: center; }
+  .atr-close {
+    color: var(--text-2); cursor: pointer; font-size: 14px; line-height: 1;
+    transition: color .15s;
+  }
+  .atr-close:hover { color: var(--text-1); }
+  .atr-body {
+    overflow-y: auto;
+    max-height: 360px;
+    padding: 8px 0;
+  }
+  .atr-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .atr-row:last-child { border-bottom: none; }
+  .atr-iter {
+    min-width: 38px;
+    color: var(--blue);
+    font-weight: 600;
+    font-size: 10.5px;
+    padding-top: 2px;
+  }
+  .atr-detail { flex: 1; line-height: 1.5; }
+  .atr-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    white-space: nowrap;
+    margin-top: 2px;
+  }
+  .atr-badge.ok   { background: rgba(7,237,65,0.12); color: #07ed41; }
+  .atr-badge.warn { background: rgba(245,158,11,0.12); color: #f59e0b; }
+</style>
+
+<div id="agenticDebugPanel">
+  <div class="atr-header" onclick="toggleAgenticPanel()">
+    <span class="atr-header-text"></span>
+    <div class="atr-header-actions">
+      <span id="atrToggleArrow" style="color:var(--text-2);font-size:11px;">▲</span>
+      <span class="atr-close" onclick="event.stopPropagation();document.getElementById('agenticDebugPanel').style.display='none'">✕</span>
+    </div>
+  </div>
+  <div class="atr-body"></div>
+</div>
+
 </body>
 </html>
