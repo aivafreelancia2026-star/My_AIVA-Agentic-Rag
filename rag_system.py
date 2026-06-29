@@ -12,9 +12,9 @@ from dataclasses import dataclass
 
 # Import statements that were missing
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain.callbacks.base import BaseCallbackHandler
 
 from config import config, templates
 
@@ -54,13 +54,13 @@ def initialize_rag_system():
     print("Initializing language model...")
     try:
         streaming_callback = EnhancedStreamingCallback()
-        llm = Ollama(
+        llm = ChatOpenAI(
             model=config.LLM_MODEL, 
             callbacks=[streaming_callback],
             temperature=0.3,
-            num_predict=700,
-            top_k=40,
-            top_p=0.9
+            max_tokens=700,
+            base_url="http://localhost:1234/v1",
+            api_key="lm-studio"
         )
         
         # Test the LLM connection
@@ -69,8 +69,8 @@ def initialize_rag_system():
         
     except Exception as e:
         print(f"  Language model initialization failed: {e}")
-        print("  Please ensure Ollama is running and the model is installed.")
-        print(f"  Try: ollama pull {config.LLM_MODEL}")
+        print("  Please ensure LM Studio is running and the model is loaded.")
+        print(f"  Load model '{config.LLM_MODEL}' in LM Studio and start the local server.")
         raise Exception(f"Could not initialize language model: {e}")
     
     print("System initialization complete!")

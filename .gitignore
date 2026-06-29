@@ -1,0 +1,9 @@
+venv/
+.env
+__pycache__/
+*.pyc
+embeddings/
+agent_uploads/
+sessions/
+data/
+graphrag.db

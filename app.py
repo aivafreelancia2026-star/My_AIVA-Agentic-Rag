@@ -1,183 +1,163 @@
+# app.py
+
 import os
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Body
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
-import time
+import sys
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Import existing functional RAG components
-import rag_system
-from rag_system import AdvancedDocumentManager, EnhancedConversationContext, EnhancedStreamingCallback
-from config import config
+import mimetypes
+from pathlib import Path
+from threading import Thread
 
-# Global state instances
-doc_manager = None
-context_manager = None
-streaming_callback = None
+from flask import Flask, jsonify, send_file, abort, make_response
+from flask_session import Session
+from werkzeug.exceptions import NotFound
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    global doc_manager, context_manager, streaming_callback
+from routes.auth_routes import auth_bp
+from routes.system_routes import system_bp
+from routes.document_routes import document_bp
+from routes.chat_routes import chat_bp
+from config import config as app_config
+
+# -------------------------------------------------------
+# Flask App
+# -------------------------------------------------------
+app = Flask(__name__)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+# Sessions
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'default-stable-secret-key-for-kb-bot')
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+app.config['SESSION_FILE_DIR'] = os.path.join(os.path.dirname(__file__), 'sessions')
+app.config['SESSION_FILE_THRESHOLD'] = 100
+os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
+
+# -------------------------------------------------------
+# Public Embedding Asset Route (no auth)
+# Example: /embedding/<doc_name>/images/<file.png>
+# Serves from: {PROJECT_ROOT}/embedding/...
+# -------------------------------------------------------
+@app.route('/embedding/<path:filename>')
+def serve_embedding_asset(filename: str):
+    """
+    Publicly serves files from EMBEDDINGS_DIR, e.g.
+      /embedding/<doc_name>/images/<file.png>
+
+    - Prevents path traversal
+    - Guesses content-type
+    - Adds public cache headers
+    - Prints resolved absolute path on 404 for easy debugging
+    """
+    base_dir = Path(app_config.EMBEDDINGS_DIR).resolve()
+    # normalize input and prevent traversal
+    safe_rel = Path(filename.lstrip("/\\"))
+    abs_path = (base_dir / safe_rel).resolve()
+
+    # stay inside base_dir
+    if not str(abs_path).startswith(str(base_dir) + os.sep):
+        abort(403)
+
+    if not abs_path.is_file():
+        print(f"[embedding 404] Tried: {abs_path}")  # helpful in console
+        raise NotFound()
+
+    ctype, _ = mimetypes.guess_type(str(abs_path))
+    resp = make_response(send_file(str(abs_path), mimetype=ctype or 'application/octet-stream'))
+    # Cache (tune if needed)
+    resp.headers['Cache-Control'] = 'public, max-age=86400, immutable'
+    return resp
+
+# -------------------------------------------------------
+# Initialize session
+# -------------------------------------------------------
+Session(app)
+
+# -------------------------------------------------------
+# Health Check (no auth required)
+# -------------------------------------------------------
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint that shows system status without requiring login"""
+    from app_state import system_initialized, initialization_error
+    if system_initialized:
+        return jsonify({'status': 'healthy', 'initialized': True})
+    else:
+        return jsonify({
+            'status': 'initializing',
+            'initialized': False,
+            'error': initialization_error
+        }), 503
+
+# -------------------------------------------------------
+# Blueprints
+# -------------------------------------------------------
+app.register_blueprint(auth_bp)
+app.register_blueprint(system_bp)
+app.register_blueprint(document_bp, url_prefix='/api')
+app.register_blueprint(chat_bp)
+
+# Register Embedding Routes
+from routes.embedding_routes import embedding_bp
+app.register_blueprint(embedding_bp)
+
+# Stage 2: Agent management routes
+from routes.agent_routes import agent_bp
+app.register_blueprint(agent_bp)
+
+# -------------------------------------------------------
+# CORS (dev)
+# -------------------------------------------------------
+@app.after_request
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+# -------------------------------------------------------
+# Errors
+# -------------------------------------------------------
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'status': 'error', 'message': 'Resource not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
+
+# -------------------------------------------------------
+# System init
+# -------------------------------------------------------
+from app_state import initialize_system
+
+if __name__ == '__main__':
+    import sys
+    if sys.stdout.encoding.lower() != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+    print("=" * 60)
+    print("🤖 RAG CHATBOT SERVER")
+    print("=" * 60)
+    print("🌐 Starting Flask server...")
+    print("📱 Open http://localhost:9072 in your browser")
+
+    # Ensure required directories exist
+    embeddings_dir = Path(app_config.EMBEDDINGS_DIR)
+    embeddings_dir.mkdir(parents=True, exist_ok=True)
+    Path(app.config['SESSION_FILE_DIR']).mkdir(parents=True, exist_ok=True)
+
+    # Log where we’re serving embedding assets from
+    print(f"📂 EMBEDDINGS_DIR = {embeddings_dir.resolve()}")
+
+    # Initialize background systems
+    print("📄 Initializing system components...")
+    initialize_system()
+
     try:
-        # Initialize LLM and Embedding models
-        rag_system.initialize_rag_system()
-        
-        # Initialize Managers
-        doc_manager = AdvancedDocumentManager(str(config.EMBEDDINGS_DIR))
-        context_manager = EnhancedConversationContext()
-        streaming_callback = EnhancedStreamingCallback()
-        
-        # Try to load existing documents
-        doc_manager.load_all_documents()
-        print("Backend successfully initialized.")
+        app.run(host='0.0.0.0', port=9072, debug=False, use_reloader=False, threaded=True)
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped by user")
     except Exception as e:
-        print(f"Warning: RAG system initialization encountered an issue: {e}")
-        # Continue anyway, let it be tested in the frontend
-    
-    yield
-    # Shutdown logic (if any)
-
-app = FastAPI(lifespan=lifespan)
-
-# Allow CORS if needed
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -----------------
-# STUBBED AUTHENTICATION
-# -----------------
-@app.post("/api/auth/login")
-async def login():
-    return {
-        "access_token": "dev-token-bypass",
-        "session_id": "dev-session-id"
-    }
-
-@app.get("/api/auth/me")
-async def get_me():
-    return {
-        "llm_choice": getattr(config, "LLM_MODEL", "gemma2"),
-        "role": "vice_president"
-    }
-
-# -----------------
-# DOCUMENT MANAGEMENT
-# -----------------
-@app.get("/api/upload/my-documents")
-async def list_documents():
-    if not doc_manager or not doc_manager.loaded_documents:
-        return []
-    
-    docs = []
-    # loaded_documents is usually a dict tracking file names and their status/chunks
-    for doc_id, doc_info in doc_manager.loaded_documents.items():
-        docs.append({
-            "filename": doc_info.get("filename", doc_id),
-            "domain": "general"  # Mock domain
-        })
-    return docs
-
-@app.post("/api/upload/")
-async def upload_document(
-    files: List[UploadFile] = File(...),
-    access_key: str = Form(...)
-):
-    # Since writing the ingestion pipeline from scratch is complex, 
-    # we'll stub this out to pretend it succeeded, or just save them to the docs folder.
-    saved_files = 0
-    for file in files:
-        contents = await file.read()
-        file_path = os.path.join(str(config.DOCS_DIR), file.filename)
-        with open(file_path, "wb") as f:
-            f.write(contents)
-        saved_files += 1
-        
-    # Reload documents (this assumes doc_manager has auto-ingestion, 
-    # but we will just return success for now)
-    return {
-        "status": "success",
-        "chunks_created": 10 * saved_files,
-        "graph_nodes": 5 * saved_files,
-        "domain": "general"
-    }
-
-# -----------------
-# CHAT ENDPOINT
-# -----------------
-@app.post("/api/chat/")
-async def chat(payload: dict = Body(...)):
-    query = payload.get("query", "")
-    session_id = payload.get("session_id", "default")
-    
-    if not query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
-    if not doc_manager or not rag_system.llm:
-        return {
-            "answer": "System is offline or failed to initialize LLM. Please check console.",
-            "confidence": 0.0,
-            "citations": [],
-            "conflicts": 0
-        }
-    
-    try:
-        # Call the existing complex query processor
-        answer, docs, query_type = rag_system.process_query_with_advanced_context(
-            query=query,
-            doc_manager=doc_manager,
-            context_manager=context_manager,
-            streaming_callback=streaming_callback
-        )
-        
-        # Build mock citations from the returned docs
-        citations = []
-        for i, doc in enumerate(docs[:5]):
-            citations.append({
-                "source": "document",
-                "doc_id": doc.metadata.get("source_document", f"doc_{i}"),
-                "conf": 0.85,
-                "anchor_num": i + 1
-            })
-            
-        return {
-            "answer": answer,
-            "confidence": 0.85,  # Fake confidence
-            "citations": citations,
-            "conflicts": 0
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# -----------------
-# STATIC FILES SERVING
-# -----------------
-@app.get("/")
-async def root():
-    with open("chatbot.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-@app.get("/{filename}")
-async def serve_static(filename: str):
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
-            if filename.endswith(".html"):
-                return HTMLResponse(content=f.read())
-            elif filename.endswith(".js"):
-                from fastapi.responses import PlainTextResponse
-                return PlainTextResponse(content=f.read(), media_type="text/javascript")
-            elif filename.endswith(".css"):
-                from fastapi.responses import PlainTextResponse
-                return PlainTextResponse(content=f.read(), media_type="text/css")
-    raise HTTPException(status_code=404, detail="File not found")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+        print(f"❌ Error starting server: {e}")
+        raise

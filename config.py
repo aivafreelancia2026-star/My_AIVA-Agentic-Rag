@@ -1,300 +1,301 @@
-"""
-config.py  ─  V4 GraphRAG Unified Configuration
-================================================
-Inherits and extends your existing RAGConfig from KB-Bot.
-All your existing settings are preserved. V4 additions are
-clearly marked with  # ── NEW V4 ──
-"""
+# config.py - Configuration and Dependencies Management
 
 import os
 import warnings
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+from typing import List, Dict, Any, Optional
 
+# Suppress warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*deprecated.*")
 warnings.filterwarnings("ignore", message=".*pin_memory.*", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*Neither CUDA nor MPS.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*Neither CUDA nor MPS are available.*", category=UserWarning)
 
-
-# ── Device detection (your existing logic, unchanged) ─────────────
+# Device detection for optimal performance
 def get_optimal_device():
+    """Detect and return the best available device for PyTorch operations"""
     try:
         import torch
         if torch.backends.mps.is_available() and torch.backends.mps.is_built():
-            return 'mps'
+            return 'mps'  # Apple Silicon GPU
         elif torch.cuda.is_available():
-            return 'cuda'
+            return 'cuda'  # NVIDIA GPU
         else:
-            return 'cpu'
+            return 'cpu'  # CPU fallback
     except ImportError:
         return 'cpu'
 
 OPTIMAL_DEVICE = get_optimal_device()
 
+# ---------- DEPENDENCY MANAGEMENT ----------
 
-# ── Optional dependency flags (your existing pattern) ─────────────
-def _try_import(name):
+# Core dependencies (required)
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:
     try:
-        __import__(name)
-        return True
+        from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError:
-        return False
+        HuggingFaceEmbeddings = None
 
-HAS_PANDAS    = _try_import("pandas")
-HAS_TABULA    = _try_import("tabula")
-HAS_CAMELOT   = _try_import("camelot")
-HAS_PYMUPDF   = _try_import("fitz")
-HAS_OCR       = _try_import("easyocr")
-HAS_PIL       = _try_import("PIL")
-HAS_OPENCV    = _try_import("cv2")
-HAS_MATPLOTLIB= _try_import("matplotlib")
-HAS_NETWORKX  = _try_import("networkx")
-HAS_KEYBERT   = _try_import("keybert")
-HAS_SPACY     = _try_import("spacy")
+from langchain_community.document_loaders import PyPDFLoader
+try:
+    from langchain_community.document_loaders import PDFPlumberLoader
+except ImportError:
+    PDFPlumberLoader = None
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+# RetrievalQA moved around depending on langchain packaging.
+# Try classic locations first (since you have langchain-classic installed),
+# then fall back to older/newer layouts.
+try:
+    from langchain.chains import RetrievalQA  # works with classic-style installs
+except Exception:
+    try:
+        from langchain_classic.chains import RetrievalQA  # if provided by langchain-classic
+    except Exception:
+        RetrievalQA = None
+
+from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
+from langchain_core.callbacks import BaseCallbackHandler
 
 
-# ══════════════════════════════════════════════════════════════════
+# Optional dependencies with graceful fallbacks
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+    print("Warning: pandas not available - Excel processing limited")
+
+try:
+    import tabula
+    HAS_TABULA = True
+except ImportError:
+    HAS_TABULA = False
+    print("Warning: tabula-py not available - advanced table extraction limited")
+
+try:
+    import camelot
+    HAS_CAMELOT = True
+except ImportError:
+    HAS_CAMELOT = False
+    print("Warning: camelot-py not available - advanced table extraction limited")
+
+try:
+    import fitz  # PyMuPDF
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
+    print("Warning: PyMuPDF not available - image extraction disabled")
+
+try:
+    import easyocr
+    HAS_OCR = True
+except ImportError:
+    HAS_OCR = False
+    print("Warning: EasyOCR not available - OCR disabled")
+
+try:
+    from PIL import Image, ImageEnhance, ImageFilter
+    import numpy as np
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    print("Warning: PIL not available - image processing limited")
+
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    print("Warning: OpenCV not available - advanced image processing disabled")
+
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib.patches import Rectangle
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+    print("Warning: matplotlib not available - chart analysis limited")
+
+try:
+    import networkx as nx
+    HAS_NETWORKX = True
+except ImportError:
+    HAS_NETWORKX = False
+
+# Advanced NLP dependencies
+try:
+    from keybert import KeyBERT
+    HAS_KEYBERT = True
+except ImportError:
+    HAS_KEYBERT = False
+    print("Warning: KeyBERT not available - advanced keyword extraction disabled")
+
+try:
+    import spacy
+    HAS_SPACY = True
+except ImportError:
+    HAS_SPACY = False
+    print("Warning: spaCy not available - named entity recognition disabled")
+
+# ---------- CONFIGURATION ----------
+
 class RAGConfig:
-    """
-    Unified config.
-    Your original KB-Bot settings are in Section A.
-    V4 additions are in Section B.
-    """
+    """Centralized configuration for the RAG system"""
 
-    # ─────────────────────────────────────────────────────────────
-    # SECTION A  ─  YOUR ORIGINAL KB-BOT SETTINGS (unchanged)
-    # ─────────────────────────────────────────────────────────────
-
-    PROJECT_ROOT   = Path(__file__).parent.absolute()
-    EMBEDDINGS_DIR = PROJECT_ROOT / "embedding"     # keeps your existing folder
-    DOCS_DIR       = PROJECT_ROOT / "docs"
-    IMAGES_DIR     = PROJECT_ROOT / "images"
-    DATA_DIR       = PROJECT_ROOT / "data"          # NEW V4 sqlite lives here
+    # Paths
+    PROJECT_ROOT = Path(__file__).parent.absolute()
+    EMBEDDINGS_DIR = PROJECT_ROOT / "embedding"
+    DOCS_DIR = PROJECT_ROOT / "docs"
+    IMAGES_DIR = PROJECT_ROOT / "images"
 
     @classmethod
     def get_embeddings_path(cls) -> str:
+        """Get embeddings directory as string for compatibility"""
         return str(cls.EMBEDDINGS_DIR)
 
-    # Chunking (your existing values)
-    CHUNK_SIZE    = int(os.getenv("CHUNK_SIZE", "1200"))
-    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+    # Chunking parameters - Enhanced for better experiment content preservation
+    CHUNK_SIZE = 1200  # Increased for better context preservation
+    CHUNK_OVERLAP = 200  # Increased overlap for better continuity
 
-    # Embedding models — your existing MoE list
-    EMBED_MODEL_OPTIONS: List[str] = [
-        "sentence-transformers/all-MiniLM-L6-v2",       # fast fallback
-        "sentence-transformers/all-mpnet-base-v2",       # primary general
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    # Model configurations - Enhanced for better experiment detection
+    EMBED_MODEL_OPTIONS = [
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "sentence-transformers/all-mpnet-base-v2",  # Better for technical content
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # Better multilingual support
     ]
-    EMBED_MODEL = EMBED_MODEL_OPTIONS[1]
-
-    # LLM (your existing Ollama config)
-    LLM_MODEL      = os.getenv("LLM_MODEL", "mistral")
-    OLLAMA_BASE_URL= os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
-
-    # Device
-    DEVICE      = OPTIMAL_DEVICE
+    EMBED_MODEL = EMBED_MODEL_OPTIONS[1]  # Use better model for technical content
+    # Override via .env (LLM_MODEL, LM_STUDIO_MAX_TOKENS). Default: gemma-4 via LM Studio.
+    LLM_MODEL = os.getenv("LLM_MODEL", "gemma-4")
+    LM_STUDIO_MAX_TOKENS = int(os.getenv("LM_STUDIO_MAX_TOKENS", "2048"))
+    LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+    
+    # Device configuration for optimal performance
+    DEVICE = OPTIMAL_DEVICE
     DEVICE_NAME = {
-        'mps':  'Apple Silicon GPU (MPS)',
-        'cuda': 'NVIDIA GPU (CUDA)',
-        'cpu':  'CPU',
+        'mps': 'Apple Silicon GPU (MPS)',
+        'cuda': 'NVIDIA GPU (CUDA)', 
+        'cpu': 'CPU'
     }.get(OPTIMAL_DEVICE, 'CPU')
 
-    # Search (your existing values)
-    FAST_QUERY_K          = 12
-    FAST_QUERY_MAX_CHARS  = 3000
-    MAX_CONTEXT_CHARS     = 10000
-    SEARCH_CACHE_SIZE     = 200
-    PARALLEL_SEARCH_THREADS = 4
-    MIN_RELEVANCE_THRESHOLD = 0.3
-
-    # Advanced NLP flags (your existing)
-    ENABLE_KEYWORD_SEARCH  = True
-    ENABLE_ENTITY_SEARCH   = True
-    ENABLE_SEMANTIC_EXPANSION = True
-    KEYWORD_BOOST_FACTOR   = 0.3
-    ENTITY_BOOST_FACTOR    = 0.4
-    CONTEXT_BOOST_FACTOR   = 0.2
-    MAX_QUERY_EXPANSIONS   = 3
-    SIMILARITY_THRESHOLD   = 0.7
-    EXPANSION_DIVERSITY    = 0.8
-    CONTEXT_MEMORY_SIZE    = 20
-    DOCUMENT_CONTEXT_WEIGHT = 0.7
-    ENTITY_CONTEXT_WEIGHT  = 0.3
-
-    # Document processing (your existing)
-    MAX_FILE_SIZE_MB         = 100
-    ENABLE_OCR_IN_DOCUMENTS  = True
-    ENABLE_TABLE_EXTRACTION  = True
-    DEFAULT_ENCODING         = 'utf-8'
-    FALLBACK_ENCODINGS       = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-    IMAGE_MIN_SIZE           = 75
-    IMAGE_MAX_SIZE           = 3000
-    OCR_CONFIDENCE_THRESHOLD = 0.3
-    TABLE_MIN_ROWS           = 2
-    SUPPORTED_DOCUMENT_FORMATS = ['.pdf', '.pptx', '.ppt', '.docx', '.txt', '.html', '.md']
-
-    # Conversation behavior (your existing)
-    USE_CONTEXT_AFTER_FIRST = False
-
-    # Company variants (your existing)
+    # Company variants for logo detection
     COMPANY_VARIANTS = [
         "intouch", "intouchcx", "intouchx", "intouchc", "in touch",
-        "intouch cx", "intouch x", "intouch c", "intouche",
+        "intouch cx", "intouch x", "intouch c", "intouche", 
+        "Intouch", "Intouchcx", "Intouchx", "Intouchc", "In touch",
+        "Intouch cx", "Intouch x", "Intouch c", "Intouche", "Intouch/"
     ]
 
-    # Capabilities (your existing pattern)
+    # Processing thresholds
+    IMAGE_MIN_SIZE = 75
+    IMAGE_MAX_SIZE = 3000
+    OCR_CONFIDENCE_THRESHOLD = 0.3
+    TABLE_MIN_ROWS = 2
+
+    # Conversation behavior
+    # If False: do not include conversation context after the first answer
+    USE_CONTEXT_AFTER_FIRST = False
+
+    # Fast query behavior (short/simple questions)
+    FAST_QUERY_K = 12  # Increased for better coverage
+    FAST_QUERY_MAX_CHARS = 3000  # Increased for more context
+    MAX_CONTEXT_CHARS = 10000  # Increased for comprehensive answers
+    
+    # Performance optimizations
+    SEARCH_CACHE_SIZE = 200  # Increased cache size
+    PARALLEL_SEARCH_THREADS = 4  # Parallel document search
+    MIN_RELEVANCE_THRESHOLD = 0.3  # Minimum relevance score to include results
+    
+    # Advanced metadata processing settings
+    ENABLE_KEYWORD_SEARCH = True
+    
+    # Multi-format processing settings - Only PDF and PPT supported
+    SUPPORTED_AUDIO_FORMATS = []  # Removed - only PDF and PPT supported
+    SUPPORTED_DOCUMENT_FORMATS = ['.pdf', '.pptx', '.ppt']  # Only PDF and PPT
+    SUPPORTED_DATA_FORMATS = []  # Removed - only PDF and PPT supported
+    SUPPORTED_TEXT_FORMATS = []  # Removed - only PDF and PPT supported
+    SUPPORTED_ARCHIVE_FORMATS = []  # Removed - only PDF and PPT supported
+    
+    # Audio processing settings
+    WHISPER_MODEL = "base"  # Can be: tiny, base, small, medium, large
+    
+    # Document processing settings
+    MAX_FILE_SIZE_MB = 100  # Maximum file size in MB
+    ENABLE_OCR_IN_DOCUMENTS = True
+    ENABLE_TABLE_EXTRACTION = True
+    
+    # Text extraction settings
+    DEFAULT_ENCODING = 'utf-8'
+    FALLBACK_ENCODINGS = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    
+    # Enhanced search settings
+    ENABLE_ENTITY_SEARCH = True   # Use spaCy entities for better matching
+    ENABLE_SEMANTIC_EXPANSION = True  # Expand queries with semantic synonyms
+    KEYWORD_BOOST_FACTOR = 0.3   # Boost relevance for keyword matches
+    ENTITY_BOOST_FACTOR = 0.4    # Boost relevance for entity matches
+    CONTEXT_BOOST_FACTOR = 0.2   # Boost relevance for contextual matches
+    
+    # Query expansion settings
+    MAX_QUERY_EXPANSIONS = 3     # Maximum number of query expansions
+    SIMILARITY_THRESHOLD = 0.7   # Threshold for semantic similarity
+    EXPANSION_DIVERSITY = 0.8    # Diversity factor for query expansion
+    
+    # Context tracking settings
+    CONTEXT_MEMORY_SIZE = 20     # Number of previous queries to remember
+    DOCUMENT_CONTEXT_WEIGHT = 0.7 # Weight for document-based context
+    ENTITY_CONTEXT_WEIGHT = 0.3  # Weight for entity-based context
+
+    # System capabilities
     CAPABILITIES = {
-        'advanced_tables':    HAS_TABULA or HAS_CAMELOT,
-        'image_processing':   HAS_PYMUPDF and HAS_OCR,
-        'chart_analysis':     HAS_MATPLOTLIB,
-        'enhanced_search':    True,
+        'advanced_tables': HAS_TABULA or HAS_CAMELOT,
+        'image_processing': HAS_PYMUPDF and HAS_OCR,
+        'chart_analysis': HAS_MATPLOTLIB,
+        'enhanced_search': True,
         'conversation_context': True,
-        'multi_format':       True,
+        'multi_format': True,
         'keyword_extraction': HAS_KEYBERT,
         'entity_recognition': HAS_SPACY,
         'semantic_expansion': HAS_KEYBERT and HAS_SPACY,
-        'advanced_metadata':  HAS_KEYBERT and HAS_SPACY,
+        'advanced_metadata': HAS_KEYBERT and HAS_SPACY
     }
-
-    # ─────────────────────────────────────────────────────────────
-    # SECTION B  ─  V4 GraphRAG NEW ADDITIONS
-    # ─────────────────────────────────────────────────────────────
-
-    # ── NEW V4: Authentication & Security ────────────────────────
-    SECRET_KEY          = os.getenv("SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_V4_GRAPHRAG")
-    TOKEN_EXPIRE_MINUTES= int(os.getenv("TOKEN_EXPIRE_MINUTES", "480"))
-    ALGORITHM           = "HS256"
-
-    # ── NEW V4: Database ─────────────────────────────────────────
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/graphrag.db")
-
-    # ── NEW V4: Neo4j Knowledge Graph ────────────────────────────
-    NEO4J_URI      = os.getenv("NEO4J_URI",      "bolt://localhost:7687")
-    NEO4J_USER     = os.getenv("NEO4J_USER",     "neo4j")
-    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-
-    # ── NEW V4: FAISS multi-model indexes ────────────────────────
-    FAISS_INDEX_DIR = PROJECT_ROOT / "embedding" / "faiss_indexes"
-    FAISS_INDEXES   = {
-        "bge":   "faiss_bge.index",
-        "e5":    "faiss_e5.index",
-        "code":  "faiss_code.index",
-        "legal": "faiss_legal.index",
-    }
-
-    # ── NEW V4: Extended MoE embedding models ────────────────────
-    MOE_EMBED_MODELS: Dict[str, Dict] = {
-        "bge":   {"model": "BAAI/bge-large-en-v1.5",
-                  "domains": ["general", "research", "analytical"], "dim": 1024},
-        "e5":    {"model": "intfloat/e5-large-v2",
-                  "domains": ["research", "technical"], "dim": 1024},
-        "code":  {"model": "microsoft/codebert-base",
-                  "domains": ["code", "engineering"], "dim": 768},
-        "legal": {"model": "nlpaueb/legal-bert-base-uncased",
-                  "domains": ["legal", "compliance"], "dim": 768},
-        # Fallback: your existing models are used when new ones unavailable
-        "minilm":{"model": "sentence-transformers/all-MiniLM-L6-v2",
-                  "domains": ["general"], "dim": 384},
-        "mpnet": {"model": "sentence-transformers/all-mpnet-base-v2",
-                  "domains": ["general", "research"], "dim": 768},
-    }
-
-    # ── NEW V4: LLM choices (multi-model selection) ───────────────
-    LLM_MODELS_AVAILABLE = [
-        {"id": "gemma2",      "name": "Gemma 2 (9B)",           "provider": "ollama",    "model_name": "gemma2:9b"},
-        {"id": "llama3",      "name": "Llama 3.1 (8B)",         "provider": "ollama",    "model_name": "llama3.1:8b"},
-        {"id": "mistral",     "name": "Mistral (7B)",            "provider": "ollama",    "model_name": "mistral:7b"},
-        {"id": "tinyllama",   "name": "TinyLlama (1.1B)",        "provider": "ollama",    "model_name": "tinyllama"},  # your existing default
-        {"id": "openai_gpt4", "name": "GPT-4o",                  "provider": "openai",    "model_name": "gpt-4o"},
-        {"id": "claude",      "name": "Claude 3.5 Sonnet",       "provider": "anthropic", "model_name": "claude-sonnet-4-5"},
-    ]
-    LLM_DEFAULT = os.getenv("LLM_DEFAULT", "mistral")   # mistral = your local model from ollama
-
-    # ── NEW V4: RBAC role definitions ─────────────────────────────
-    ROLES: Dict[str, Dict] = {
-        "agent":          {"level": 1, "max_documents": 100,  "can_upload": True},
-        "manager":        {"level": 2, "max_documents": 300,  "can_upload": True},
-        "vice_president": {"level": 3, "max_documents": None, "can_upload": True},
-    }
-
-    # ── NEW V4: Re-ranker ─────────────────────────────────────────
-    RERANKER_MODEL    = "BAAI/bge-reranker-large"
-    RERANKER_TOP_K_IN = 15
-    RERANKER_TOP_K_OUT= 5
-
-    # ── NEW V4: NLI verifier ─────────────────────────────────────
-    NLI_MODEL          = "cross-encoder/nli-deberta-v3-large"
-    NLI_AMBIGUITY_LOW  = 0.40
-    NLI_AMBIGUITY_HIGH = 0.75
-
-    # ── NEW V4: Graph traversal ───────────────────────────────────
-    GRAPH_BEAM_WIDTH          = 3
-    GRAPH_MAX_DEPTH           = 3
-    GRAPH_RELEVANCE_THRESHOLD = 0.65
-    GRAPH_HOP_DECAY           = 0.95
-
-    # ── NEW V4: Adaptive context budget ──────────────────────────
-    CONTEXT_BUDGET = {
-        "factual":     3,
-        "analytical":  7,
-        "multi_hop":   15,
-        "comparative": 10,
-    }
-    PRUNE_EXPANSION_THRESHOLD = 0.40   # if >40% pruned, expand 1.5x
-
-    # ── NEW V4: Bayesian confidence ───────────────────────────────
-    CONFIDENCE_HOP_PENALTY = 0.95     # conf × 0.95^hop
-    CONFIDENCE_MIN_CRAG    = 0.60     # CRAG rejects below this
-
-    # ── NEW V4: Knowledge Fabric schema version ───────────────────
-    FABRIC_SCHEMA_VERSION = "2.1"
-
-    @classmethod
-    def ensure_dirs(cls):
-        """Create all required directories"""
-        for d in [cls.EMBEDDINGS_DIR, cls.DOCS_DIR, cls.IMAGES_DIR,
-                  cls.DATA_DIR, cls.FAISS_INDEX_DIR]:
-            d.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def get_capability_status(cls) -> Dict[str, str]:
-        """Your existing capability status method — unchanged"""
-        s = {}
-        s['device']   = f"[OK] ({cls.DEVICE_NAME})"
-        s['tables']   = f"{'[OK]' if cls.CAPABILITIES['advanced_tables'] else '[OFFLINE]'} ({'Tabula' if HAS_TABULA else ''}{' + Camelot' if HAS_CAMELOT else ' pattern-based'})"
-        s['images']   = f"{'[OK]' if cls.CAPABILITIES['image_processing'] else '[OFFLINE]'} ({'PyMuPDF + EasyOCR' if HAS_PYMUPDF and HAS_OCR else 'Limited'})"
-        s['charts']   = f"{'[OK]' if cls.CAPABILITIES['chart_analysis'] else '[OFFLINE]'} ({'Advanced' if HAS_MATPLOTLIB else 'Basic OCR only'})"
-        s['search']   = "[OK] (Intelligent context-aware)"
-        s['context']  = "[OK] (Entity and topic tracking)"
-        s['formats']  = "[OK] (PDF, PPT, DOCX, TXT, HTML, MD)"
-        s['keywords'] = f"{'[OK]' if HAS_KEYBERT else '[OFFLINE]'} ({'KeyBERT' if HAS_KEYBERT else 'Basic'})"
-        s['entities'] = f"{'[OK]' if HAS_SPACY else '[OFFLINE]'} ({'spaCy NER' if HAS_SPACY else 'Basic'})"
-        s['graph']    = "[OK] Neo4j Knowledge Graph"   # NEW V4
-        s['rbac']     = "[OK] Role-Based Access Control"  # NEW V4
-        return s
+        """Get formatted capability status"""
+        status = {}
+        status['device'] = f"✅ ({cls.DEVICE_NAME})"
+        status['tables'] = f"{'✅' if cls.CAPABILITIES['advanced_tables'] else '❌'} ({'Tabula' if HAS_TABULA else ''}{' + Camelot' if HAS_CAMELOT else 'Pattern-based only'})"
+        status['images'] = f"{'✅' if cls.CAPABILITIES['image_processing'] else '❌'} ({'PyMuPDF + EasyOCR' if HAS_PYMUPDF and HAS_OCR else 'Limited'})"
+        status['charts'] = f"{'✅' if cls.CAPABILITIES['chart_analysis'] else '❌'} ({'Advanced' if HAS_MATPLOTLIB else 'Basic OCR only'})"
+        status['search'] = "✅ (Intelligent context-aware)"
+        status['context'] = "✅ (Entity and topic tracking)"
+        status['formats'] = "✅ (PDF and PPT only)"
+        status['keywords'] = f"{'✅' if cls.CAPABILITIES['keyword_extraction'] else '❌'} ({'KeyBERT' if HAS_KEYBERT else 'Basic'})"
+        status['entities'] = f"{'✅' if cls.CAPABILITIES['entity_recognition'] else '❌'} ({'spaCy NER' if HAS_SPACY else 'Basic'})"
+        status['semantic'] = f"{'✅' if cls.CAPABILITIES['semantic_expansion'] else '❌'} ({'Advanced' if HAS_KEYBERT and HAS_SPACY else 'Basic'})"
+        return status
 
-
-# ══════════════════════════════════════════════════════════════════
-# Prompt Templates  ─  your full set preserved + V4 additions
-# ══════════════════════════════════════════════════════════════════
+# ---------- PROMPT TEMPLATES ----------
 
 class PromptTemplates:
-    """All your original templates preserved. V4 adds graph-aware template."""
+    """Centralized prompt templates with intelligent, context-aware analysis"""
 
-    # ── Your existing templates (unchanged) ──────────────────────
-
-    ADVANCED_CONTEXT_QA_TEMPLATE = """You are an expert document analyst with advanced reasoning capabilities.
-Provide intelligent, context-aware answers using both the document content and conversation context.
+    ADVANCED_CONTEXT_QA_TEMPLATE = """You are an expert document analyst with advanced reasoning capabilities. 
+Provide intelligent, context-aware answers using both the document content and conversation context. 
 Try keeping the answers a little short, not to be too lengthy, and usually to the point; depending on the question asked.
-If asked for document names or roles or specific person names, keep it very concise and brief.
+If asked for document names (do not give entire analysis, page specific analysis or content analysis, just the document name) or roles or anything specific person names, try keeping it very concise and brief.
+Adapt your style depending on the type of question: general explanation, data extraction, structured analysis, or contextual reasoning.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -305,40 +306,54 @@ DOCUMENT CONTENT:
 QUESTION: {question}
 
 ANALYSIS INSTRUCTIONS:
-1. REFERENCE RESOLUTION: Resolve vague references using conversation context.
-2. CONTEXTUAL UNDERSTANDING: Adjust depth to match question type.
-3. DATA HANDLING: Extract structured data accurately, highlight patterns.
-4. INSIGHT GENERATION: Explain why information matters.
-5. SOURCE ATTRIBUTION: Cite document name/section/page.
-6. GENDER NEUTRALITY: Use gender-neutral language.
+1. REFERENCE RESOLUTION: If the question includes vague references (it, this, that, previous, etc.), resolve them using the conversation context.
+
+2. CONTEXTUAL UNDERSTANDING: Interpret the question carefully:
+   - If general, provide a broad yet relevant explanation
+   - If specific, extract precise information from the document
+   - Adjust depth of analysis to match the question type
+
+3. DATA HANDLING: When the answer involves structured data (tables, lists, charts, records):
+   - Extract all relevant details accurately
+   - Highlight patterns, groupings, or relationships
+   - Present findings clearly and systematically
+   - Be precise and avoid assumptions
+
+4. INSIGHT GENERATION: Beyond extraction, explain:
+   - Why the information matters
+   - What relationships, trends, or hierarchies exist
+   - Any broader significance in context
+
+5. VISUAL/CHART ANALYSIS: For charts or images:
+   - Identify the type and purpose of the visualization
+   - Extract numerical data, categories, and patterns
+   - Provide insights and implications connected to the question
+
+6. SOURCE ATTRIBUTION: Always cite sources clearly:
+   - Document name/section
+   - Page numbers when available
+
+7. RESPONSE FORMAT: Structure the answer for clarity:
+   - Use numbered or bulleted points for multiple items
+   - Group related information together
+   - Keep concise unless detail is explicitly required
+
+8. COMPLETENESS: Cover all relevant aspects of the question without omitting important details.
+
+9. CONSISTENCY: Ensure consistency across multiple queries about the same information.
+
+10. GENDER NEUTRALITY: When referring to people, use gender-neutral language. Use "they" instead of "he/she", "this person" instead of "he/she", and avoid gender-specific pronouns unless explicitly specified in the source material.
 
 OUTPUT STYLE:
-- Start with a short direct answer
-- Use bullet points (*) for lists, bold (**text**) for emphasis
-- End with a short source note
+- Start with a short direct answer or brief summary
+- If needed, add a simple breakdown (e.g., key points, data, insights)
+- End with a short source note (document name/section/page if specifically asked for)
+- Format your response for clarity. Use bullet points (using '*') for lists and bold text (using '**text**') for emphasis. Avoid other markdown like headers (e.g., #, ##).
+
 
 ANSWER:"""
 
-    TABLE_ANALYSIS_TEMPLATE = """You are a data analysis expert. Provide intelligent, structured analysis of the table.
-
-TABLE CONTENT:
-{table_content}
-
-CONVERSATION CONTEXT:
-{conversation_context}
-
-QUESTION: {question}
-
-INSTRUCTIONS:
-1. Extract all relevant entries accurately from the table.
-2. Avoid assumptions beyond what is shown.
-3. Identify patterns, anomalies, groupings.
-4. Structure: summary → breakdown → insights.
-5. Use gender-neutral language.
-
-ANSWER:"""
-
-    CHART_ANALYSIS_TEMPLATE = """You are a data visualization expert. Analyze this chart or graph.
+    CHART_ANALYSIS_TEMPLATE = """You are a data visualization expert. Provide a complete, intelligent analysis of the chart or graph.
 
 CHART/VISUAL CONTENT:
 {chart_content}
@@ -348,16 +363,57 @@ CONVERSATION CONTEXT:
 
 QUESTION: {question}
 
-INSTRUCTIONS:
-1. Identify chart type and purpose.
-2. Extract labels, axes, values, trends.
-3. Analyze patterns and anomalies.
-4. Generate insights from the data.
-5. Connect to conversation context.
+CHART ANALYSIS INSTRUCTIONS:
+1. IDENTIFY the chart type and its main purpose.
+2. EXTRACT visible details:
+   - Labels, categories, axes, values, scales
+   - Trends, peaks, troughs, anomalies
+3. ANALYZE patterns:
+   - Upward/downward trends
+   - Comparisons across categories
+   - Cycles or irregularities
+4. GENERATE INSIGHTS:
+   - What the data reveals
+   - Why it matters in context
+   - Implications for the scenario
+5. CONNECT findings to the surrounding context or prior conversation.
+6. STRUCTURE the response with clarity and systematic explanation.
+7. Provide SOURCE attribution at the end.
 
 ANSWER:"""
 
-    DOCUMENT_SUMMARY_TEMPLATE = """You are an expert document summarizer.
+    TABLE_ANALYSIS_TEMPLATE = """You are a data analysis expert. Provide intelligent, structured analysis of the table in context.
+
+TABLE CONTENT:
+{table_content}
+
+CONVERSATION CONTEXT:
+{conversation_context}
+
+QUESTION: {question}
+
+TABLE ANALYSIS INSTRUCTIONS:
+1. DATA EXTRACTION: Extract all relevant entries, attributes, and values from the table data.
+2. ACCURACY: Be precise and accurate - only state what is explicitly shown in the table data.
+3. AVOID ASSUMPTIONS: Do not make assumptions or interpretations beyond what is clearly stated in the table.
+4. PATTERN & RELATIONSHIP ANALYSIS:
+   - Groupings, categories, or hierarchies
+   - Notable trends, anomalies, or dependencies
+5. CONTEXTUAL SIGNIFICANCE:
+   - Purpose of the table in the document
+   - Why the data matters for the question
+   - Broader meaning in organizational or analytical context
+6. STRUCTURE the answer clearly:
+   - Start with a summary answer based on table data
+   - Follow with detailed breakdown from the table
+   - Organize into sections (Data Extraction, Relationships, Insights)
+7. SOURCE ATTRIBUTION: Include source details (document name, page numbers if available, type of content).
+8. CONSISTENCY: If multiple tables contain similar information, ensure consistency in your analysis.
+9. GENDER NEUTRALITY: When referring to people, use gender-neutral language. Use "they" instead of "he/she", "this person" instead of "he/she", and avoid gender-specific pronouns unless explicitly specified in the source material.
+
+ANSWER:"""
+
+    DOCUMENT_SUMMARY_TEMPLATE = """You are an expert document summarizer. Provide a comprehensive, detailed summary of the document content.
 
 CONTEXT:
 {context}
@@ -365,17 +421,26 @@ CONTEXT:
 CONVERSATION CONTEXT:
 {conversation_context}
 
+INSTRUCTIONS:
+1. COMPREHENSIVE ANALYSIS: Analyze ALL the provided content to create a complete summary
+2. STRUCTURE: Organize the summary with clear sections:
+   - Document Overview (purpose, scope, main topic)
+   - Key Concepts and Topics
+   - Important Details and Findings
+   - Technical Information (if applicable)
+   - Conclusions or Outcomes
+3. DETAILED CONTENT: Include specific details, numbers, names, and important information
+4. COMPLETE COVERAGE: Ensure you cover all major aspects of the document
+5. CLARITY: Write in clear, professional language
+6. SOURCE ATTRIBUTION: Include source document information
+7. COMPREHENSIVE SCOPE: This should be a thorough summary, not just key points
+
 QUESTION: {question}
 
-INSTRUCTIONS:
-1. Analyze ALL provided content comprehensively.
-2. Structure: Overview → Key Concepts → Details → Technical Info → Conclusions.
-3. Include specific details, numbers, names.
-4. Include source attribution.
+Provide a detailed, comprehensive summary of the document:"""
 
-Provide a detailed comprehensive summary:"""
-
-    PAGE_SPECIFIC_TEMPLATE = """You are an expert document analyst for page-specific content.
+    PAGE_SPECIFIC_TEMPLATE = """You are an expert document analyst specializing in page-specific content analysis. 
+Provide a detailed and accurate answer based ONLY on the content from the specific page(s) provided below.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -385,15 +450,17 @@ PAGE-SPECIFIC CONTENT:
 
 QUESTION: {question}
 
-INSTRUCTIONS:
-1. Confine answer to PAGE-SPECIFIC CONTENT only.
-2. Describe all content including text, data, images.
-3. If content is missing, state it clearly.
-4. Attribute your answer to the specific page.
+PAGE-SPECIFIC ANALYSIS INSTRUCTIONS:
+1.  **Strict Focus:** Confine your answer *exclusively* to the information within the "PAGE-SPECIFIC CONTENT" section. Do not use any external knowledge or information from other parts of the document unless it is provided.
+2.  **Describe Everything:** Analyze and describe all content on the page, including text, data, and any descriptions of images or charts.
+3.  **Direct Answer:** If the user asks what is on a specific page, describe its contents comprehensively.
+4.  **Source Attribution:** State clearly that your answer is based on the content of the requested page (e.g., "Based on the content of slide 47...").
+5.  **If Content is Missing:** If the provided context does not contain the requested information, state clearly: "The provided content for the requested page does not contain that information."
 
 ANSWER:"""
 
-    UI_ELEMENT_TEMPLATE = """You are a UI/UX expert analyzing user interface elements from screenshots.
+    UI_ELEMENT_TEMPLATE = """You are a UI/UX expert analyzing user interface elements from application screenshots. 
+Provide detailed, accurate information about UI elements like popups, dialogs, screens, tabs, buttons, and interface components.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -403,61 +470,93 @@ UI ELEMENT CONTENT:
 
 QUESTION: {question}
 
-INSTRUCTIONS:
-1. Identify all UI elements: popups, dialogs, buttons, tabs, screens.
-2. Extract element details systematically.
-3. Explain purpose, context, relationships.
-4. Use exact names as shown in screenshots.
+UI ELEMENT ANALYSIS INSTRUCTIONS:
+1. UI IDENTIFICATION: Identify all UI elements in the screenshots:
+   - Popup/Dialog names and titles
+   - Screen/Page names
+   - Tab names and navigation elements
+   - Button text and interactive elements
+   - Labels, fields, and form elements
+2. STRUCTURED EXTRACTION: Extract UI element details systematically:
+   - Name of the UI element (exact text)
+   - Type of element (popup, dialog, screen, tab, button, etc.)
+   - Context where it appears
+   - Related or surrounding elements
+3. CONTEXTUAL UNDERSTANDING: Explain:
+   - Purpose of the UI element
+   - When/how it appears
+   - What actions it enables
+   - Relationship to other UI elements
+4. PRECISE TERMINOLOGY: Use exact names/text as shown in the screenshots
+5. HIERARCHICAL ORGANIZATION: Show UI element relationships:
+   - Parent-child relationships (popup contains tabs, screen has buttons)
+   - Navigation flow (what leads to what)
+6. ANNOTATIONS & CALLOUTS: Include any explanatory text, annotations, or callouts shown
+7. SOURCE ATTRIBUTION: Reference specific slides/pages where UI elements appear
+8. COMPLETENESS: Cover all requested UI elements comprehensively
+
+RESPONSE FORMAT:
+- Start with direct answer to the question
+- List UI element names with their types
+- Provide context for each element
+- Explain relationships if relevant
+- Include source references (slide/page numbers)
 
 ANSWER:"""
 
-    # ── NEW V4: Graph-aware synthesis template ────────────────────
-    GRAPH_SYNTHESIS_TEMPLATE = """You are an expert analyst combining knowledge graph facts with document evidence.
-Every claim must cite its source. Use ONLY the provided sources.
-{domain_instruction}
+# ---------- UTILITY FUNCTIONS ----------
 
-QUESTION: {question}
+def ensure_directory(path: str) -> None:
+    """Ensure directory exists"""
+    os.makedirs(path, exist_ok=True)
 
-GRAPH KNOWLEDGE (high-confidence facts from knowledge graph):
-{graph_facts}
+def get_pdf_name(pdf_path: str) -> str:
+    """Extract PDF name without extension and replace spaces with underscores"""
+    return Path(pdf_path).stem.replace(" ", "_")
 
-CONVERSATION CONTEXT:
-{memory_context}
+def validate_pdf_path(pdf_path: str) -> bool:
+    """Validate PDF file exists (legacy function - use validate_document_path for multi-format)"""
+    return os.path.isfile(pdf_path) and pdf_path.lower().endswith('.pdf')
 
-NUMBERED SOURCES (cite as [1], [2] etc.):
-{anchors}
+def validate_document_path(file_path: str) -> bool:
+    """Validate document file exists and is supported format"""
+    if not os.path.isfile(file_path):
+        return False
+    
+    # Import here to avoid circular imports
+    try:
+        from unified_document_processor import FileTypeDetector
+        return FileTypeDetector.is_supported(file_path)
+    except ImportError:
+        # Fallback to PDF only if unified_document_processor not available
+        return file_path.lower().endswith('.pdf')
 
-{conflict_note}
-DERIVED CONCLUSIONS:
-{derived}
+def get_document_name(file_path: str) -> str:
+    """Extract document name without extension and replace spaces with underscores (multi-format)"""
+    return Path(file_path).stem.replace(" ", "_")
 
-QUESTION (restated): {question}
+def get_supported_formats() -> List[str]:
+    """Get list of all supported file formats - Only PDF and PPT"""
+    try:
+        from unified_document_processor import FileTypeDetector
+        return FileTypeDetector.get_supported_extensions()
+    except ImportError:
+        return ['.pdf', '.pptx', '.ppt']  # Fallback
 
-Answer with inline citations formatted as [source_num, conf=X.XX].
-Start with a direct answer. Use bullet points (*) for lists.
+# ---------- GLOBAL OBJECTS ----------
 
-ANSWER:"""
-
-
-# ══════════════════════════════════════════════════════════════════
-# Global singletons
-# ══════════════════════════════════════════════════════════════════
-
-config    = RAGConfig()
+config = RAGConfig()
 templates = PromptTemplates()
 
-# Ensure directories exist
-config.ensure_dirs()
-
-# Module-level exports (your existing pattern)
+# Expose key configs at module level (for easy import)
 EMBED_MODEL_OPTIONS = RAGConfig.EMBED_MODEL_OPTIONS
-EMBED_MODEL         = RAGConfig.EMBED_MODEL
-LLM_MODEL           = RAGConfig.LLM_MODEL
+EMBED_MODEL = RAGConfig.EMBED_MODEL
+LLM_MODEL = RAGConfig.LLM_MODEL
 
-TABLE_ANALYSIS_TEMPLATE    = PromptTemplates.TABLE_ANALYSIS_TEMPLATE
-CHART_ANALYSIS_TEMPLATE    = PromptTemplates.CHART_ANALYSIS_TEMPLATE
+# Expose template strings at module level
+TABLE_ANALYSIS_TEMPLATE = PromptTemplates.TABLE_ANALYSIS_TEMPLATE
+CHART_ANALYSIS_TEMPLATE = PromptTemplates.CHART_ANALYSIS_TEMPLATE
 ADVANCED_CONTEXT_QA_TEMPLATE = PromptTemplates.ADVANCED_CONTEXT_QA_TEMPLATE
-DOCUMENT_SUMMARY_TEMPLATE  = PromptTemplates.DOCUMENT_SUMMARY_TEMPLATE
-PAGE_SPECIFIC_TEMPLATE     = PromptTemplates.PAGE_SPECIFIC_TEMPLATE
-UI_ELEMENT_TEMPLATE        = PromptTemplates.UI_ELEMENT_TEMPLATE
-GRAPH_SYNTHESIS_TEMPLATE   = PromptTemplates.GRAPH_SYNTHESIS_TEMPLATE  # NEW V4
+DOCUMENT_SUMMARY_TEMPLATE = PromptTemplates.DOCUMENT_SUMMARY_TEMPLATE
+PAGE_SPECIFIC_TEMPLATE = PromptTemplates.PAGE_SPECIFIC_TEMPLATE
+UI_ELEMENT_TEMPLATE = PromptTemplates.UI_ELEMENT_TEMPLATE

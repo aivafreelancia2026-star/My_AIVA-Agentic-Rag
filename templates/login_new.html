@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIVA — Access</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='agent.png') }}?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Theme system ── */
+    :root {
+      --blur: 20px;
+      --radius: 20px;
+    }
+
+    :root, [data-theme="dark"] {
+      --bg-grad: linear-gradient(140deg, #060d1a 0%, #0b1628 55%, #081808 100%);
+      --orb1: rgba(7,237,65,0.10);
+      --orb2: rgba(75,110,245,0.12);
+      --surface: rgba(255,255,255,0.06);
+      --surface2: rgba(255,255,255,0.09);
+      --border: rgba(255,255,255,0.10);
+      --border-hi: rgba(7,237,65,0.45);
+      --text-1: #dde6f4;
+      --text-2: #6b7a99;
+      --text-3: #3d4d6a;
+      --accent: #07ed41;
+      --accent-glow: rgba(7,237,65,0.28);
+      --accent-dark: #05b030;
+      --error-bg: rgba(239,68,68,0.12);
+      --error-border: rgba(239,68,68,0.35);
+      --error-text: #fca5a5;
+      --success-bg: rgba(7,237,65,0.10);
+      --success-border: rgba(7,237,65,0.35);
+      --success-text: #6effa0;
+      --tag-bg: rgba(7,237,65,0.12);
+      --tag-text: #07ed41;
+      --tag-border: rgba(7,237,65,0.20);
+      --select-bg: rgba(255,255,255,0.04);
+      --input-placeholder: #3d4d6a;
+    }
+
+    [data-theme="light"] {
+      --bg-grad: linear-gradient(140deg, #edf3ff 0%, #f5fff8 55%, #eef6ff 100%);
+      --orb1: rgba(5,168,46,0.12);
+      --orb2: rgba(59,92,245,0.12);
+      --surface: rgba(255,255,255,0.68);
+      --surface2: rgba(255,255,255,0.82);
+      --border: rgba(100,140,200,0.18);
+      --border-hi: rgba(5,168,46,0.50);
+      --text-1: #1a2540;
+      --text-2: #4a607a;
+      --text-3: #8fa0be;
+      --accent: #05a82e;
+      --accent-glow: rgba(5,168,46,0.25);
+      --accent-dark: #047a22;
+      --error-bg: rgba(220,38,38,0.08);
+      --error-border: rgba(220,38,38,0.30);
+      --error-text: #b91c1c;
+      --success-bg: rgba(5,168,46,0.08);
+      --success-border: rgba(5,168,46,0.30);
+      --success-text: #166534;
+      --tag-bg: rgba(5,168,46,0.10);
+      --tag-text: #047a22;
+      --tag-border: rgba(5,168,46,0.22);
+      --select-bg: rgba(255,255,255,0.50);
+      --input-placeholder: #8fa0be;
+    }
+
+    /* ── Base ── */
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-grad);
+      font-family: "Inter", system-ui, sans-serif;
+      color: var(--text-1);
+      transition: background 0.4s ease, color 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Ambient orbs */
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+      transition: background 0.4s ease;
+    }
+    body::before {
+      width: 600px; height: 600px;
+      top: -150px; left: -150px;
+      background: var(--orb1);
+    }
+    body::after {
+      width: 500px; height: 500px;
+      bottom: -100px; right: -100px;
+      background: var(--orb2);
+    }
+
+    /* ── Theme toggle ── */
+    .theme-toggle {
+      position: fixed;
+      top: 20px; right: 20px;
+      z-index: 100;
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      color: var(--text-2);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 16px;
+    }
+    .theme-toggle:hover { border-color: var(--border-hi); color: var(--text-1); }
+
+    /* ── Card ── */
+    .card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+      margin: 1rem;
+      background: var(--surface);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+      transition: background 0.3s, border-color 0.3s;
+    }
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%);
+      pointer-events: none;
+    }
+
+    /* ── Header ── */
+    .logo-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.25rem;
+    }
+    .logo-wrap img {
+      width: 68px; height: 68px;
+      object-fit: contain;
+      border-radius: 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 10px;
+    }
+    .card h1 {
+      font-size: 1.7rem;
+      font-weight: 600;
+      color: var(--text-1);
+      text-align: center;
+      margin-bottom: 0.3rem;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      font-size: 0.875rem;
+      color: var(--text-2);
+      text-align: center;
+      margin-bottom: 2rem;
+      line-height: 1.5;
+    }
+
+    /* ── Form elements ── */
+    .field {
+      margin-bottom: 1.5rem;
+    }
+    .field label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    .select-wrap {
+      position: relative;
+    }
+    .select-wrap::after {
+      content: "";
+      position: absolute;
+      right: 14px; top: 50%;
+      transform: translateY(-50%);
+      width: 0; height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 5px solid var(--text-3);
+      pointer-events: none;
+      transition: border-top-color 0.2s;
+    }
+    .select-wrap:focus-within::after { border-top-color: var(--accent); }
+
+    select {
+      width: 100%;
+      padding: 0.8rem 2.5rem 0.8rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--select-bg);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: var(--text-1);
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    select:focus {
+      border-color: var(--border-hi);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    select option {
+      background: #0b1628;
+      color: #dde6f4;
+    }
+    [data-theme="light"] select option {
+      background: #ffffff;
+      color: #1a2540;
+    }
+
+    /* ── Access preview ── */
+    .access-preview {
+      margin-top: 1rem;
+      padding: 0.875rem;
+      background: var(--surface2);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: none;
+    }
+    .access-preview h3 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.6rem;
+    }
+    .access-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .access-tag {
+      padding: 0.25rem 0.65rem;
+      background: var(--tag-bg);
+      border: 1px solid var(--tag-border);
+      color: var(--tag-text);
+      border-radius: 100px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .no-access {
+      font-size: 0.8rem;
+      color: var(--text-3);
+      font-style: italic;
+    }
+
+    /* ── Messages ── */
+    .msg {
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      display: none;
+      line-height: 1.5;
+    }
+    .msg.error {
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error-text);
+    }
+    .msg.success {
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      color: var(--success-text);
+    }
+
+    /* ── Submit button ── */
+    .submit-btn {
+      width: 100%;
+      padding: 0.875rem;
+      border: none;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #0a1628;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 20px var(--accent-glow);
+      position: relative;
+      overflow: hidden;
+    }
+    .submit-btn::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 60%);
+      pointer-events: none;
+    }
+    .submit-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 28px var(--accent-glow);
+    }
+    .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(0,0,0,0.25);
+      border-top-color: #0a1628;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Embed button ── */
+    .embed-btn {
+      position: absolute;
+      top: 18px; right: 18px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-2);
+      font-size: 0.8rem;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .embed-btn:hover { border-color: var(--border-hi); color: var(--text-1); }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: var(--text-3);
+    }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-box {
+      background: var(--surface);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      width: 480px;
+      max-width: 92%;
+      overflow: hidden;
+    }
+    .modal-head {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-head h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-1);
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.3rem;
+      color: var(--text-3);
+      cursor: pointer;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .modal-close:hover { color: var(--text-1); }
+    .modal-body { padding: 1.25rem; }
+
+    .embed-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+    }
+    .embed-opt {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 0.75rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--surface2);
+    }
+    .embed-opt:hover { border-color: var(--border-hi); }
+    .embed-opt .icon { font-size: 1.6rem; margin-bottom: 0.4rem; }
+    .embed-opt h3 { font-size: 0.8rem; font-weight: 600; color: var(--text-1); margin-bottom: 0.25rem; }
+    .embed-opt p { font-size: 0.7rem; color: var(--text-2); }
+
+    .embed-form { display: none; }
+    .embed-form label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-2);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+    .embed-form input, .embed-form select {
+      width: 100%;
+      padding: 0.65rem 0.875rem;
+      background: var(--select-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-1);
+      font-size: 0.875rem;
+      font-family: inherit;
+      outline: none;
+      margin-bottom: 0.875rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      appearance: none;
+    }
+    .embed-form input:focus, .embed-form select:focus {
+      border-color: var(--border-hi);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #0a1628;
+      border: none;
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover { box-shadow: 0 4px 14px var(--accent-glow); }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text-2);
+      border: 1px solid var(--border);
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--border-hi); color: var(--text-1); }
+
+    .status-msg {
+      font-size: 0.85rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      margin-bottom: 0.875rem;
+    }
+    .status-msg.success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text); }
+    .status-msg.error   { background: var(--error-bg);   border: 1px solid var(--error-border);   color: var(--error-text); }
+
+    .role-selection {
+      margin-top: 1.25rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      display: none;
+    }
+    .role-selection label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-2);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.5rem;
+    }
+    .role-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      max-height: 140px;
+      overflow-y: auto;
+      padding: 0.5rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      scrollbar-width: thin;
+    }
+    .role-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--text-1);
+      cursor: pointer;
+      padding: 0.2rem 0.3rem;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .role-checkbox:hover { background: var(--surface3); }
+    .role-checkbox input { width: auto; margin: 0; accent-color: var(--accent); }
+
+    @media (max-width: 480px) {
+      .card { padding: 2rem 1.25rem; }
+      .embed-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙</button>
+
+  <div class="card">
+    <button class="embed-btn" onclick="openEmbed()">+ Embed</button>
+
+    <div class="logo-wrap">
+      <img src="{{ url_for('static', filename='agent.png') }}?v=2" alt="AIVA"
+           onerror="this.parentElement.innerHTML='🤖'">
+    </div>
+
+    <h1>AIVA</h1>
+    <p class="subtitle">Select your designation to access your documents</p>
+
+    <div class="msg error" id="errorMsg"></div>
+    <div class="msg success" id="successMsg"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="designation">Designation</label>
+        <div class="select-wrap">
+          <select id="designation" required>
+            <option value="">Choose your designation…</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="access-preview" id="accessPreview">
+        <h3>Document Access</h3>
+        <div class="access-tags" id="accessList"></div>
+      </div>
+
+      <div style="margin-top: 1.5rem;"></div>
+
+      <button type="submit" class="submit-btn" id="loginBtn">
+        <div class="spinner" id="spinner"></div>
+        <span id="btnText">Access Chatbot</span>
+      </button>
+    </form>
+
+    <div class="footer">Secure role-based document access</div>
+  </div>
+
+  <!-- Embed Modal -->
+  <div class="modal-overlay" id="embedModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>Embed Content</h2>
+        <button class="modal-close" onclick="closeEmbed()">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="embedStatus" class="status-msg" style="display:none;"></div>
+
+        <div id="embedOptions" class="embed-grid">
+          <div class="embed-opt" onclick="showEmbedForm('url')">
+            <div class="icon">🌍</div>
+            <h3>Public URL</h3>
+            <p>Embed an article from the web</p>
+          </div>
+          <div class="embed-opt" onclick="showEmbedForm('kbase')">
+            <div class="icon">📚</div>
+            <h3>KBase Page</h3>
+            <p>Embed a Confluence page</p>
+          </div>
+          <div class="embed-opt" onclick="showEmbedForm('doc')">
+            <div class="icon">📄</div>
+            <h3>Upload Doc</h3>
+            <p>PDF, PPTX, or DOCX</p>
+          </div>
+        </div>
+
+        <div class="role-selection" id="roleSelectionContainer">
+          <label>Who can access this?</label>
+          <div class="role-list" id="roleList"></div>
+        </div>
+
+        <div id="form-url" class="embed-form">
+          <label>Enter Public URL</label>
+          <input type="text" id="urlInput" placeholder="https://example.com/article">
+          <div class="form-actions">
+            <button class="btn-secondary" onclick="backToOptions()">Back</button>
+            <button class="btn-primary" onclick="submitEmbed('url')">Embed URL</button>
+          </div>
+        </div>
+
+        <div id="form-kbase" class="embed-form">
+          <label>Select Space</label>
+          <select id="spaceSelect" onchange="fetchPages()">
+            <option value="">— Select Space —</option>
+          </select>
+          <div id="pageSelectRow" style="display:none;">
+            <label>Select Page</label>
+            <select id="pageSelect">
+              <option value="">— Select Page —</option>
+            </select>
+          </div>
+          <div class="form-actions">
+            <button class="btn-secondary" onclick="backToOptions()">Back</button>
+            <button class="btn-primary" onclick="submitEmbed('kbase')">Embed Page</button>
+          </div>
+        </div>
+
+        <div id="form-doc" class="embed-form">
+          <label>Select Document</label>
+          <input type="file" id="docInput"
+            accept=".pdf,.pptx,.docx,.doc,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+          <div class="form-actions">
+            <button class="btn-secondary" onclick="backToOptions()">Back</button>
+            <button class="btn-primary" onclick="submitEmbed('doc')">Upload & Embed</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Theme ─────────────────────────────────────────────────
+    function toggleTheme() {
+      const html = document.documentElement;
+      const btn  = document.getElementById("themeToggle");
+      const isDark = html.getAttribute("data-theme") !== "light";
+      if (isDark) {
+        html.setAttribute("data-theme", "light");
+        btn.textContent = "☀️";
+        localStorage.setItem("aiva-theme", "light");
+      } else {
+        html.setAttribute("data-theme", "dark");
+        btn.textContent = "🌙";
+        localStorage.setItem("aiva-theme", "dark");
+      }
+    }
+    (function initTheme() {
+      const saved = localStorage.getItem("aiva-theme") || "dark";
+      document.documentElement.setAttribute("data-theme", saved);
+      const btn = document.getElementById("themeToggle");
+      if (btn) btn.textContent = saved === "light" ? "☀️" : "🌙";
+    })();
+
+    // ── Login App ──────────────────────────────────────────────
+    class LoginApp {
+      constructor() {
+        this.accessData = {};
+        this.selectedDesignation = "";
+        this.form      = document.getElementById("loginForm");
+        this.select    = document.getElementById("designation");
+        this.btn       = document.getElementById("loginBtn");
+        this.btnText   = document.getElementById("btnText");
+        this.spinner   = document.getElementById("spinner");
+        this.errorMsg  = document.getElementById("errorMsg");
+        this.successMsg= document.getElementById("successMsg");
+        this.preview   = document.getElementById("accessPreview");
+        this.accessList= document.getElementById("accessList");
+
+        this.form.addEventListener("submit", e => this.handleLogin(e));
+        this.select.addEventListener("change", e => this.handleChange(e));
+        this.loadAccessData();
+      }
+
+      async loadAccessData() {
+        try {
+          const res = await fetch("/api/access-data");
+          const data = await res.json();
+          if (res.ok) {
+            this.accessData = data.access_data;
+            this.populateSelect();
+          } else {
+            this.showError("Failed to load access data: " + data.message);
+          }
+        } catch {
+          this.showError("Failed to connect to server. Please try again.");
+        }
+      }
+
+      populateSelect() {
+        this.select.innerHTML = "<option value=''>Choose your designation…</option>";
+        Object.keys(this.accessData).forEach(d => {
+          const opt = document.createElement("option");
+          opt.value = d;
+          opt.textContent = d.replace(/([A-Z])/g," $1").replace(/^./,s=>s.toUpperCase()).replace(/\b\w/g,l=>l.toUpperCase()).trim();
+          this.select.appendChild(opt);
+        });
+      }
+
+      handleChange(e) {
+        this.selectedDesignation = e.target.value;
+        if (this.selectedDesignation && this.accessData[this.selectedDesignation]) {
+          this.showPreview(this.selectedDesignation);
+        } else {
+          this.preview.style.display = "none";
+        }
+      }
+
+      showPreview(d) {
+        const access = this.accessData[d];
+        if (!access) return;
+        const allowed = Object.keys(access).filter(k => access[k] === 1);
+        if (allowed.length === 0) {
+          this.accessList.innerHTML = "<span class='no-access'>No document access granted</span>";
+        } else {
+          this.accessList.innerHTML = allowed.map(doc =>
+            `<span class="access-tag">${doc.replace(/_/g," ").replace(/\b\w/g,l=>l.toUpperCase())}</span>`
+          ).join("");
+        }
+        this.preview.style.display = "block";
+      }
+
+      async handleLogin(e) {
+        e.preventDefault();
+        if (!this.selectedDesignation) { this.showError("Please select your designation"); return; }
+        this.setLoading(true);
+        this.hideMessages();
+        try {
+          const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ designation: this.selectedDesignation })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            this.showSuccess("Login successful! Redirecting…");
+            setTimeout(() => { window.location.href = "/chatbot"; }, 1400);
+          } else {
+            this.showError(data.message || "Login failed");
+          }
+        } catch {
+          this.showError("Connection error. Please try again.");
+        } finally {
+          this.setLoading(false);
+        }
+      }
+
+      setLoading(on) {
+        this.btn.disabled = on;
+        this.spinner.style.display = on ? "block" : "none";
+        this.btnText.textContent = on ? "Logging in…" : "Access Chatbot";
+      }
+      showError(m) { this.errorMsg.textContent = m; this.errorMsg.style.display = "block"; this.successMsg.style.display = "none"; }
+      showSuccess(m) { this.successMsg.textContent = m; this.successMsg.style.display = "block"; this.errorMsg.style.display = "none"; }
+      hideMessages() { this.errorMsg.style.display = "none"; this.successMsg.style.display = "none"; }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => { window.loginApp = new LoginApp(); });
+
+    // ── Embed Modal ────────────────────────────────────────────
+    function openEmbed() { document.getElementById("embedModal").style.display = "flex"; }
+    function closeEmbed() {
+      document.getElementById("embedModal").style.display = "none";
+      document.querySelectorAll(".embed-form").forEach(f => f.style.display = "none");
+      document.getElementById("embedOptions").style.display = "grid";
+      const st = document.getElementById("embedStatus");
+      st.style.display = "none"; st.textContent = "";
+      document.getElementById("roleSelectionContainer").style.display = "none";
+    }
+
+    async function showEmbedForm(type) {
+      document.getElementById("embedOptions").style.display = "none";
+      document.getElementById("form-" + type).style.display = "block";
+      document.getElementById("roleSelectionContainer").style.display = "block";
+      await fetchRoles();
+      if (type === "kbase") await fetchSpaces();
+    }
+
+    async function fetchRoles() {
+      const container = document.getElementById("roleList");
+      if (container.children.length > 0) return;
+      try {
+        const res = await fetch("/api/roles");
+        const data = await res.json();
+        if (data.success) {
+          container.innerHTML = data.roles.map(r =>
+            `<label class="role-checkbox"><input type="checkbox" name="roles" value="${r}"><span>${r}</span></label>`
+          ).join("");
+        }
+      } catch {}
+    }
+
+    function backToOptions() {
+      document.querySelectorAll(".embed-form").forEach(f => f.style.display = "none");
+      document.getElementById("embedOptions").style.display = "grid";
+      const st = document.getElementById("embedStatus");
+      st.style.display = "none"; st.textContent = "";
+      document.getElementById("roleSelectionContainer").style.display = "none";
+      if (document.getElementById("spaceSelect")) {
+        document.getElementById("spaceSelect").innerHTML = "<option value=''>— Select Space —</option>";
+        document.getElementById("pageSelect").innerHTML  = "<option value=''>— Select Page —</option>";
+        document.getElementById("pageSelectRow").style.display = "none";
+      }
+    }
+
+    async function fetchSpaces() {
+      const sel = document.getElementById("spaceSelect");
+      sel.innerHTML = "<option value=''>Loading spaces…</option>";
+      try {
+        const res = await fetch("/api/kbase/spaces");
+        const data = await res.json();
+        if (data.success) {
+          sel.innerHTML = "<option value=''>— Select Space —</option>" +
+            data.spaces.map(s => `<option value="${s.key}">${s.name} (${s.key})</option>`).join("");
+        } else throw new Error(data.message);
+      } catch(e) { showStatus("Error: " + e.message, "error"); }
+    }
+
+    async function fetchPages() {
+      const spaceKey = document.getElementById("spaceSelect").value;
+      const pageSel  = document.getElementById("pageSelect");
+      const row      = document.getElementById("pageSelectRow");
+      if (!spaceKey) { row.style.display = "none"; return; }
+      row.style.display = "block";
+      pageSel.innerHTML = "<option value=''>Loading pages…</option>";
+      try {
+        const res = await fetch(`/api/kbase/pages/${spaceKey}`);
+        const data = await res.json();
+        if (data.success) {
+          pageSel.innerHTML = "<option value=''>— Select Page —</option>" +
+            data.pages.map(p => `<option value="${p.id}">${p.title}</option>`).join("");
+        } else throw new Error(data.message);
+      } catch(e) { showStatus("Error: " + e.message, "error"); }
+    }
+
+    async function submitEmbed(type) {
+      showStatus("Processing… this may take a moment.", "");
+      const roles = Array.from(document.querySelectorAll("input[name=roles]:checked")).map(c => c.value);
+      let url, body;
+      try {
+        if (type === "url") {
+          const val = document.getElementById("urlInput").value.trim();
+          if (!val) throw new Error("Please enter a URL");
+          url  = "/api/embed/url";
+          body = JSON.stringify({ url: val, roles });
+        } else if (type === "kbase") {
+          const pageId = document.getElementById("pageSelect").value;
+          if (!pageId) throw new Error("Please select a page");
+          url  = "/api/embed/kbase";
+          body = JSON.stringify({ page_id: pageId, roles });
+        } else if (type === "doc") {
+          const file = document.getElementById("docInput").files[0];
+          if (!file) throw new Error("Please select a file");
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("roles", JSON.stringify(roles));
+          const res = await fetch("/api/embed/doc", { method: "POST", body: fd });
+          const dat = await res.json();
+          if (dat.success) {
+            showStatus("Success! " + dat.message, "success");
+            if (window.loginApp) window.loginApp.loadAccessData();
+            setTimeout(closeEmbed, 2000);
+          } else throw new Error(dat.message);
+          return;
+        }
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+        const dat = await res.json();
+        if (dat.success) {
+          showStatus("Success! " + dat.message, "success");
+          if (window.loginApp) window.loginApp.loadAccessData();
+          setTimeout(closeEmbed, 2000);
+        } else throw new Error(dat.message);
+      } catch(e) { showStatus("Error: " + e.message, "error"); }
+    }
+
+    function showStatus(msg, cls) {
+      const el = document.getElementById("embedStatus");
+      el.textContent = msg;
+      el.className = "status-msg" + (cls ? " " + cls : "");
+      el.style.display = "block";
+    }
+
+    // Close modal on backdrop click
+    document.getElementById("embedModal").addEventListener("click", function(e) {
+      if (e.target === this) closeEmbed();
+    });
+  </script>
+</body>
+</html>

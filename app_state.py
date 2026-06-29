@@ -1,215 +1,126 @@
 """
-app_state.py  ─  V4 GraphRAG Application State
-================================================
-Upgraded from your existing app_state.py.
-Original initialization logic is preserved and extended.
-V4 additions: MoE embedder, Neo4j, FAISS multi-index,
-RBAC DB, snapshot fabric, NLI verifier.
+Application state management.
+This module holds the global application state to avoid circular imports.
 """
-
 import os
 from pathlib import Path
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_openai import ChatOpenAI
+from modules.document_manager import AdvancedDocumentManager
+from modules.conversation import EnhancedConversationContext
 from config import config as app_config
 
-# ── State flags (your existing pattern) ──────────────────────────
-system_initialized   = False
+# Initialize system state
+system_initialized = False
 initialization_error = None
-
-# ── Your existing components ──────────────────────────────────────
-embedding_model  = None    # primary HuggingFace model (your existing)
-llm              = None    # Ollama LLM (your existing)
-doc_manager      = None    # AdvancedDocumentManager (your existing)
-context_manager  = None    # EnhancedConversationContext (your existing)
-streaming_callback = None  # your existing streaming callback
-
-# ── NEW V4 components ─────────────────────────────────────────────
-moe_embedder     = None    # MoE multi-model embedder
-faiss_manager    = None    # multi-index FAISS manager
-neo4j_db         = None    # Neo4j graph DB connection
-sql_engine       = None    # SQLAlchemy engine
-knowledge_fabric = None    # Knowledge Fabric Layer (snapshot isolation)
-nli_verifier     = None    # NLI fact verifier
-reranker         = None    # Cross-encoder re-ranker
-
+embedding_model = None
+llm = None
+doc_manager = None
+context_manager = None
+streaming_callback = None
+agent_manager = None          # ← Stage 2: AIVA Agent Manager
 
 def get_system_state():
-    """
-    Returns all state objects.
-    Extended from your original 7-tuple to include V4 components.
-    """
-    return (
-        system_initialized,
-        initialization_error,
-        doc_manager,
-        context_manager,
-        app_config,
-        embedding_model,
-        llm,
-        # V4 additions:
-        moe_embedder,
-        faiss_manager,
-        neo4j_db,
-        knowledge_fabric,
-    )
+    """Get the current system state"""
+    return system_initialized, initialization_error, doc_manager, context_manager, app_config, embedding_model, llm
 
+def get_agent_manager():
+    """Return the global AgentManager instance (or None if not ready)."""
+    return agent_manager
 
 def initialize_system():
-    """
-    Initialize the full V4 GraphRAG system.
-    Follows your existing initialization pattern exactly.
-    V4 components initialize AFTER your existing components
-    so existing functionality is never broken.
-    """
-    global system_initialized, initialization_error
-    global embedding_model, llm, doc_manager, context_manager, streaming_callback
-    global moe_embedder, faiss_manager, neo4j_db, sql_engine, knowledge_fabric
-    global nli_verifier, reranker
-
+    """Initialize the RAG system on startup"""
+    global system_initialized, initialization_error, doc_manager, context_manager, embedding_model, llm, streaming_callback, agent_manager
+    
     try:
-        print("=" * 60)
-        print("[START] Initializing V4 GraphRAG System")
-        print("=" * 60)
-
-        # ── STEP 1: Your existing embedding model init (unchanged) ──
-        print(f"\n[1/8] Loading embedding model on {app_config.DEVICE}...")
-        from langchain_huggingface import HuggingFaceEmbeddings
-
-        loaded_model_name = None
-        for model_name in app_config.EMBED_MODEL_OPTIONS:
+        print("Initializing RAG system...")
+        
+        # Initialize embedding model - use the same model that was used to create embeddings
+        print(f"Loading embedding model on {app_config.DEVICE}...")
+        try:
+            # Use the first model from EMBED_MODEL_OPTIONS (same as embedding creator)
+            embedding_model = HuggingFaceEmbeddings(
+                model_name=app_config.EMBED_MODEL_OPTIONS[0],
+                model_kwargs={'device': app_config.DEVICE},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+            print(f"✅ Embedding model loaded: {app_config.EMBED_MODEL_OPTIONS[0]} on {app_config.DEVICE}")
+        except Exception as e1:
             try:
-                print(f"  Trying {model_name}...")
+                # Fallback to the second model
+                print(f"Warning: Failed to load primary model, trying fallback {app_config.EMBED_MODEL}...")
                 embedding_model = HuggingFaceEmbeddings(
-                    model_name=model_name,
+                    model_name=app_config.EMBED_MODEL,
                     model_kwargs={'device': app_config.DEVICE},
                     encode_kwargs={'normalize_embeddings': True}
                 )
-                loaded_model_name = model_name
-                print(f"  [OK] Loaded: {model_name} on {app_config.DEVICE}")
-                break
-            except Exception as e:
-                print(f"  [WARN] Failed {model_name}: {e}")
-        if embedding_model is None:
-            raise Exception("Could not load any embedding model")
-
-        # ── STEP 2: Your existing LLM init (unchanged) ──────────────
-        print(f"\n[2/8] Initializing language model ({app_config.LLM_MODEL})...")
+                print(f"✅ Fallback embedding model loaded: {app_config.EMBED_MODEL} on {app_config.DEVICE}")
+            except Exception as e2:
+                raise Exception(f"Failed to load any embedding model: {e2}")
+        
+        # Initialize LLM via LM Studio's OpenAI-compatible endpoint
+        print("Initializing language model...")
         try:
-            from langchain_community.llms import Ollama
-            llm = Ollama(
+            lm_studio_base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+            llm_base_url = f"{lm_studio_base_url.rstrip('/')}/v1"
+
+            llm = ChatOpenAI(
                 model=app_config.LLM_MODEL,
                 temperature=0.1,
-                base_url=app_config.OLLAMA_BASE_URL,
-                num_ctx=app_config.OLLAMA_NUM_CTX,
+                base_url=llm_base_url,
+                api_key=os.getenv("LLM_API_KEY", "lm-studio"),
+                max_tokens=getattr(app_config, "LM_STUDIO_MAX_TOKENS", 2048),
             )
-            print(f"  [OK] LLM ready: {app_config.LLM_MODEL} @ {app_config.OLLAMA_BASE_URL}")
+
+            print(f"✅ Language model initialized: {app_config.LLM_MODEL} @ {llm_base_url}")
+
         except Exception as e:
-            print(f"  [WARN] LLM init failed: {e} — continuing in search-only mode")
-            llm = None
-
-        # ── STEP 3: Your existing document manager ──────────────────
-        print("\n[3/8] Initializing document manager...")
-        from modules.document_manager import AdvancedDocumentManager
-        from modules.conversation import EnhancedConversationContext
+            print(f"⚠️  Warning: LLM initialization failed: {e}")
+            print("   The system will continue with document search only (no LLM responses)")
+            llm = None  # Continue without LLM
+        
+        # Initialize managers
         os.makedirs(app_config.EMBEDDINGS_DIR, exist_ok=True)
-        doc_manager     = AdvancedDocumentManager(
-            str(app_config.EMBEDDINGS_DIR),
-            embedding_model=embedding_model
-        )
+        doc_manager = AdvancedDocumentManager(app_config.EMBEDDINGS_DIR, embedding_model=embedding_model)
         context_manager = EnhancedConversationContext()
-        print("  [OK] Document manager ready")
-
-        # ── STEP 4: Your existing document auto-load ─────────────────
-        print("\n[4/8] Loading documents (60s timeout)...")
+        
+        # Auto-load documents if available (with timeout to prevent blocking)
+        print("Loading documents...")
         from threading import Thread
-        def _load():
+        import time
+        
+        def load_docs_with_timeout(timeout_seconds=60):
+            """Load documents with a timeout to prevent blocking"""
             try:
                 doc_manager.load_all_documents()
             except Exception as e:
-                print(f"  [WARN] Doc loading warning: {e}")
-
-        t = Thread(target=_load, daemon=True)
-        t.start()
-        t.join(timeout=60)
-        if t.is_alive():
-            print("  [WARN] Document loading timed out — continuing")
-        else:
-            print(f"  [OK] Documents loaded: {len(doc_manager.loaded_documents)} available")
-
-        # ── STEP 5: NEW V4 — MoE multi-model embedder ────────────────
-        print("\n[5/8] Initializing MoE embedder (V4)...")
-        try:
-            from app.ingestion.embedder import MoEEmbedder
-            moe_embedder = MoEEmbedder(fallback_model=embedding_model)
-            print("  [OK] MoE embedder ready")
-        except Exception as e:
-            print(f"  [WARN] MoE embedder failed: {e} — using primary model only")
-            moe_embedder = None
-
-        # ── STEP 6: NEW V4 — FAISS multi-index manager ───────────────
-        print("\n[6/8] Initializing FAISS multi-index (V4)...")
-        try:
-            from app.core.database import FAISSManager
-            faiss_manager = FAISSManager()
-            print("  [OK] FAISS multi-index ready")
-        except Exception as e:
-            print(f"  [WARN] FAISS multi-index failed: {e}")
-            faiss_manager = None
-
-        # ── STEP 7: NEW V4 — SQL DB + Neo4j (non-blocking) ───────────
-        print("\n[7/8] Initializing databases (V4)...")
-        try:
-            from app.core.database import init_db, engine as _engine
-            sql_engine = _engine
-            init_db()
-            print("  [OK] SQL database ready")
-        except Exception as e:
-            print(f"  [WARN] SQL DB failed: {e}")
-
-        try:
-            from app.core.database import Neo4jDB
-            neo4j_db = Neo4jDB
-            # Verify connection
-            with neo4j_db.session() as s:
-                s.run("RETURN 1")
-            print("  [OK] Neo4j connected")
-        except Exception as e:
-            print(f"  [WARN] Neo4j not available: {e} — graph features disabled")
-            neo4j_db = None
-
-        # ── STEP 8: NEW V4 — Knowledge Fabric + lazy NLI/reranker ────
-        print("\n[8/8] Initializing Knowledge Fabric (V4)...")
-        try:
-            from app.graph.knowledge_fabric import KnowledgeFabric
-            knowledge_fabric = KnowledgeFabric()
-            print("  [OK] Knowledge Fabric ready")
-        except Exception as e:
-            print(f"  [WARN] Knowledge Fabric failed: {e}")
-            knowledge_fabric = None
-
-        # NLI and re-ranker load lazily (first query that needs them)
-        print("  [INFO] NLI verifier + re-ranker: lazy load on first query")
-
+                print(f"⚠️  Warning: Document loading failed: {e}")
+        
+        # Try to load documents with a timeout
+        doc_thread = Thread(target=load_docs_with_timeout, daemon=True)
+        doc_thread.start()
+        doc_thread.join(timeout=60)  # Wait max 60 seconds for document loading
+        
+        if doc_thread.is_alive():
+            print("⚠️  Warning: Document loading timed out (60s), continuing without full documents")
+        
         system_initialized = True
-        print("\n" + "=" * 60)
-        print("[OK] V4 GraphRAG System Ready")
-        print("=" * 60)
-        _print_startup_summary()
+        print("✅ System initialization complete")
 
+        # ── Stage 2: Start AIVA Agent Manager & scheduler ──────────────────
+        try:
+            from agents.agent_manager import AgentManager
+            from agents.scheduler import start_scheduler
+            agent_manager = AgentManager(embedding_model)
+            start_scheduler(agent_manager)
+            print("✅ Agent Manager started (Stage 2 active)")
+        except Exception as e:
+            print(f"⚠️  Agent Manager failed to start: {e}")
+            agent_manager = None
+        
     except Exception as e:
         system_initialized = False
         initialization_error = str(e)
-        print(f"\n[FAIL] Initialization failed: {e}")
+        print(f"❌ Error initializing system: {e}")
         raise
-
-
-def _print_startup_summary():
-    """Print a clean summary of what is active."""
-    status = app_config.get_capability_status()
-    print("\n[INFO] Active Capabilities:")
-    for key, val in status.items():
-        print(f"   {key:<12} {val}")
-    print(f"\n   docs loaded  {len(doc_manager.loaded_documents) if doc_manager else 0}")
-    print(f"   llm          {'[OK] ' + app_config.LLM_MODEL if llm else '[OFFLINE]'}")
-    print(f"   neo4j        {'[OK] connected' if neo4j_db else '[OFFLINE] not available'}")
-    print(f"   moe embed    {'[OK] active' if moe_embedder else '[WARN] primary only'}")
-    print()

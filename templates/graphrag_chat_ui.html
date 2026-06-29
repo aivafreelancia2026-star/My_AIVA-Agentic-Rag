@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AIVA — Notebook RAG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── Reset & tokens ───────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blur:    16px;
+      --radius:  10px;
+      --danger:  #FF5A65;
+    }
+
+    /* Dark theme (default) */
+    :root, [data-theme="dark"] {
+      --bg-grad:     linear-gradient(140deg, #060d1a 0%, #0b1628 55%, #081808 100%);
+      --orb1:        rgba(7,237,65,0.07);
+      --orb2:        rgba(75,110,245,0.09);
+
+      /* Left panel */
+      --nb-bg:       rgba(255,255,255,0.04);
+      --nb-surface:  rgba(255,255,255,0.07);
+      --nb-border:   rgba(255,255,255,0.09);
+      --nb-text:     #8a9ab8;
+      --nb-muted:    #4a556e;
+      --nb-heading:  #dde6f4;
+
+      /* Center / Right */
+      --main-bg:     transparent;
+      --white:       rgba(255,255,255,0.05);
+      --border:      rgba(255,255,255,0.09);
+      --text:        #dde6f4;
+      --muted:       #6b7a99;
+
+      --green:       #07ed41;
+      --green-dim:   rgba(7,237,65,0.12);
+      --green-glow:  rgba(7,237,65,0.28);
+      --accent:      #4B6EF5;
+      --accent-dim:  rgba(75,110,245,0.14);
+      --shadow:      0 2px 16px rgba(0,0,0,0.3);
+      --scrollbar:   rgba(255,255,255,0.08);
+
+      --badge-indexed-bg:  rgba(7,237,65,0.12);
+      --badge-indexed-txt: #07ed41;
+      --badge-indexing-bg: rgba(255,170,0,0.12);
+      --badge-indexing-txt:#C87800;
+      --badge-failed-bg:   rgba(255,90,101,0.12);
+      --badge-failed-txt:  #FF5A65;
+      --badge-other-bg:    rgba(255,255,255,0.06);
+      --badge-other-txt:   #6b7a99;
+
+      --toast-bg:    rgba(30,36,58,0.95);
+      --toast-text:  #dde6f4;
+      --src-sep:     rgba(255,255,255,0.07);
+      --chip-bg:     rgba(255,255,255,0.05);
+      --chip-hover:  rgba(7,237,65,0.08);
+      --chip-text:   #6b7a99;
+      --chip-hover-text: #07ed41;
+      --user-bubble-bg:  rgba(75,110,245,0.20);
+      --user-bubble-txt: #dde6f4;
+    }
+
+    /* Light theme */
+    [data-theme="light"] {
+      --bg-grad:     linear-gradient(140deg, #edf3ff 0%, #f5fff8 55%, #eef6ff 100%);
+      --orb1:        rgba(5,168,46,0.10);
+      --orb2:        rgba(59,92,245,0.10);
+
+      --nb-bg:       rgba(255,255,255,0.62);
+      --nb-surface:  rgba(255,255,255,0.78);
+      --nb-border:   rgba(100,140,200,0.16);
+      --nb-text:     #4a607a;
+      --nb-muted:    #8fa0be;
+      --nb-heading:  #1a2540;
+
+      --main-bg:     transparent;
+      --white:       rgba(255,255,255,0.72);
+      --border:      rgba(100,140,200,0.16);
+      --text:        #1a2540;
+      --muted:       #4a607a;
+
+      --green:       #05a82e;
+      --green-dim:   rgba(5,168,46,0.10);
+      --green-glow:  rgba(5,168,46,0.25);
+      --accent:      #3b5cf5;
+      --accent-dim:  rgba(59,92,245,0.10);
+      --shadow:      0 2px 16px rgba(0,0,0,0.06);
+      --scrollbar:   rgba(0,0,0,0.08);
+
+      --badge-indexed-bg:  rgba(5,168,46,0.10);
+      --badge-indexed-txt: #05a82e;
+      --badge-indexing-bg: rgba(180,120,0,0.10);
+      --badge-indexing-txt:#9a6200;
+      --badge-failed-bg:   rgba(220,38,38,0.10);
+      --badge-failed-txt:  #dc2626;
+      --badge-other-bg:    rgba(0,0,0,0.05);
+      --badge-other-txt:   #4a607a;
+
+      --toast-bg:    rgba(26,37,64,0.92);
+      --toast-text:  #f0f4ff;
+      --src-sep:     rgba(100,140,200,0.14);
+      --chip-bg:     rgba(255,255,255,0.72);
+      --chip-hover:  rgba(5,168,46,0.08);
+      --chip-text:   #4a607a;
+      --chip-hover-text: #05a82e;
+      --user-bubble-bg:  rgba(59,92,245,0.14);
+      --user-bubble-txt: #1a2540;
+    }
+
+    html, body {
+      height: 100%; font-family: 'Inter', sans-serif; overflow: hidden;
+      background: var(--bg-grad); color: var(--text);
+      transition: background 0.4s ease, color 0.3s ease;
+    }
+
+    /* Ambient orbs */
+    body::before, body::after {
+      content: ""; position: fixed; border-radius: 50%;
+      pointer-events: none; z-index: 0; filter: blur(80px);
+      transition: background 0.4s ease;
+    }
+    body::before { width: 500px; height: 500px; top: -100px; left: -80px; background: var(--orb1); }
+    body::after  { width: 400px; height: 400px; bottom: -80px; right: -80px; background: var(--orb2); }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+    * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+
+    /* ── App shell ────────────────────────────────────────────────── */
+    .app { display: flex; height: 100vh; overflow: hidden; position: relative; z-index: 1; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       LEFT PANEL — Notebook list
+    ═══════════════════════════════════════════════════════════════ */
+    .left-panel {
+      width: 260px;
+      min-width: 260px;
+      background: var(--nb-bg);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--nb-border);
+      transition: margin-left .28s ease, background 0.3s;
+      z-index: 20;
+    }
+    .left-panel.hidden { margin-left: -260px; }
+
+    /* Header */
+    .lp-header {
+      padding: 18px 16px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--nb-border);
+      flex-shrink: 0;
+    }
+    .aiva-mark {
+      width: 30px; height: 30px;
+      background: var(--green);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .aiva-mark svg { width: 16px; height: 16px; fill: #0a0f1a; }
+    .brand-text { line-height: 1; }
+    .brand-text strong { display: block; font-size: 14px; font-weight: 700; color: var(--nb-heading); letter-spacing: .3px; }
+    .brand-text span   { font-size: 10px; color: var(--nb-muted); letter-spacing: .5px; text-transform: uppercase; }
+
+    /* New notebook button */
+    .btn-new {
+      margin: 12px 12px 4px;
+      padding: 9px 14px;
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px dashed rgba(0,217,126,.35);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      transition: background .18s, border-color .18s;
+      font-family: inherit;
+    }
+    .btn-new:hover { background: rgba(0,217,126,.18); border-color: rgba(0,217,126,.55); }
+    .btn-new .plus { font-size: 18px; line-height: 1; font-weight: 300; }
+
+    /* Inline new-notebook input */
+    .new-nb-row {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 12px 6px;
+    }
+    .new-nb-row.visible { display: flex; }
+    .new-nb-row input {
+      flex: 1;
+      background: var(--nb-surface);
+      border: 1px solid var(--green);
+      border-radius: 7px;
+      color: var(--nb-heading);
+      font-size: 13px;
+      font-family: inherit;
+      padding: 6px 10px;
+      outline: none;
+    }
+    .new-nb-row button {
+      background: var(--green);
+      border: none;
+      border-radius: 7px;
+      color: #0a0f1a;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 11px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+
+    /* Section label */
+    .lp-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      font-weight: 600;
+      color: var(--nb-muted);
+      padding: 10px 16px 5px;
+    }
+
+    /* General mode row */
+    .general-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 2px 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background .15s;
+    }
+    .general-row:hover { background: rgba(255,255,255,.04); }
+    .general-row.active {
+      background: rgba(255,255,255,.06);
+      border-color: var(--nb-border);
+    }
+    .general-row .gr-icon { font-size: 15px; }
+    .general-row .gr-label { font-size: 13px; color: var(--nb-text); flex: 1; }
+    .general-row.active .gr-label { color: var(--nb-heading); font-weight: 500; }
+
+    /* Notebook list */
+    .nb-list {
+      list-style: none;
+      padding: 0 8px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .nb-item {
+      border-radius: var(--radius);
+      margin-bottom: 2px;
+      border: 1px solid transparent;
+      overflow: hidden;
+    }
+    .nb-item.active {
+      background: rgba(0,217,126,.07);
+      border-color: rgba(0,217,126,.22);
+    }
+
+    /* Row */
+    .nb-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 10px;
+      cursor: pointer;
+      border-radius: var(--radius);
+      transition: background .14s;
+      user-select: none;
+    }
+    .nb-row:hover { background: rgba(255,255,255,.04); }
+    .nb-item.active .nb-row:hover { background: rgba(0,217,126,.07); }
+
+    .nb-chevron {
+      font-size: 9px;
+      color: var(--nb-muted);
+      transition: transform .2s;
+      flex-shrink: 0;
+      width: 10px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .nb-item.open .nb-chevron { transform: rotate(90deg); }
+    .nb-book { font-size: 15px; flex-shrink: 0; }
+    .nb-name-wrap { flex: 1; overflow: hidden; }
+    .nb-name {
+      font-size: 13px;
+      color: var(--nb-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+    .nb-item.active .nb-name { color: var(--nb-heading); font-weight: 500; }
+    .nb-meta { font-size: 10px; color: var(--nb-muted); margin-top: 1px; }
+
+    /* Rename input */
+    .nb-rename-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--green);
+      color: var(--nb-heading);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      padding: 1px 2px;
+      min-width: 0;
+    }
+
+    /* Action buttons */
+    .nb-actions {
+      display: flex; gap: 1px;
+      opacity: 0;
+      transition: opacity .15s;
+      flex-shrink: 0;
+    }
+    .nb-row:hover .nb-actions,
+    .nb-item.active .nb-actions { opacity: 1; }
+    .nb-act {
+      width: 22px; height: 22px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 5px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--nb-muted);
+      transition: background .12s, color .12s;
+    }
+    .nb-act:hover { background: rgba(255,255,255,.08); color: var(--nb-heading); }
+    .nb-act.del:hover { color: var(--danger); }
+
+    /* Expanded sources */
+    .nb-sources {
+      display: none;
+      padding: 0 10px 8px 30px;
+    }
+    .nb-item.open .nb-sources { display: block; }
+
+    .nb-src-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--nb-muted);
+      transition: background .12s;
+    }
+    .nb-src-item:hover { background: rgba(255,255,255,.04); color: var(--nb-text); }
+    .nb-src-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+
+    .nb-indexing {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px;
+      color: var(--green);
+      padding: 3px 6px;
+      opacity: .85;
+    }
+    .spin {
+      width: 8px; height: 8px;
+      border: 1.5px solid var(--green);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .nb-empty { font-size: 11px; color: var(--nb-muted); padding: 3px 6px; }
+
+    .btn-add-src {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px;
+      color: var(--nb-muted);
+      background: none;
+      border: 1px dashed #3A3D55;
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      margin-top: 4px;
+      width: 100%;
+      font-family: inherit;
+      transition: color .14s, border-color .14s;
+    }
+    .btn-add-src:hover { color: var(--green); border-color: rgba(0,217,126,.35); }
+
+    /* Footer */
+    .lp-footer {
+      padding: 12px 14px;
+      border-top: 1px solid var(--nb-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .user-pill { display: flex; align-items: center; gap: 8px; }
+    .u-avatar {
+      width: 27px; height: 27px;
+      border-radius: 50%;
+      background: var(--green);
+      color: #0a0f1a;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 11px;
+      flex-shrink: 0;
+    }
+    .u-name { font-size: 12px; font-weight: 500; color: var(--nb-heading); }
+    .btn-logout {
+      background: none;
+      border: 1px solid var(--nb-border);
+      color: var(--nb-muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color .14s, color .14s;
+    }
+    .btn-logout:hover { border-color: #555; color: var(--nb-text); }
+
+    /* ═══════════════════════════════════════════════════════════════
+       CENTER PANEL — Chat
+    ═══════════════════════════════════════════════════════════════ */
+    .center-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--main-bg);
+    }
+
+    /* Top bar */
+    .top-bar {
+      height: 54px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--white);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .tb-left { display: flex; align-items: center; gap: 12px; }
+    .hamburger {
+      cursor: pointer; color: var(--muted);
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px;
+      transition: background .14s;
+    }
+    .hamburger:hover { background: var(--main-bg); color: var(--text); }
+
+    /* Active context pill */
+    .ctx-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--main-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 12px 5px 9px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      max-width: 230px;
+      overflow: hidden;
+    }
+    .ctx-pill .cp-icon { font-size: 14px; flex-shrink: 0; }
+    .ctx-pill .cp-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ctx-pill .cp-dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 5px var(--green);
+    }
+
+    /* Search mode selector (general mode only) */
+    .mode-wrap { position: relative; display: flex; align-items: center; }
+    .mode-select {
+      appearance: none;
+      background: var(--main-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 28px 5px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      cursor: pointer;
+      outline: none;
+      font-family: inherit;
+    }
+    .mode-caret {
+      position: absolute; right: 10px;
+      font-size: 9px; color: var(--muted);
+      pointer-events: none;
+    }
+
+    .tb-right { display: flex; align-items: center; gap: 8px; }
+    .model-pill {
+      font-size: 11px;
+      background: var(--main-bg);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 12px;
+      color: var(--muted);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .model-dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
+    .icon-btn {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 7px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: background .14s, color .14s;
+    }
+    .icon-btn:hover { background: var(--main-bg); color: var(--text); }
+
+    /* Messages */
+    .msgs-wrap {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Welcome */
+    .welcome {
+      margin: auto;
+      max-width: 540px;
+      text-align: center;
+      padding: 32px 24px;
+    }
+    .welcome-icon { font-size: 46px; margin-bottom: 14px; display: block; }
+    .welcome h1 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .welcome p { font-size: 13px; color: var(--muted); line-height: 1.65; margin-bottom: 24px; }
+    .welcome-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .w-chip {
+      background: var(--chip-bg);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 18px;
+      font-size: 12px;
+      color: var(--chip-text);
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color .14s, color .14s, box-shadow .14s, background .14s;
+    }
+    .w-chip:hover {
+      background: var(--chip-hover);
+      border-color: var(--green);
+      color: var(--chip-hover-text);
+      box-shadow: 0 0 0 3px var(--green-dim);
+    }
+
+    /* Message rows */
+    .msg-row {
+      display: flex;
+      gap: 11px;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+      animation: fadeUp .2s ease;
+    }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+    .msg-row.user { flex-direction: row-reverse; }
+
+    .msg-avatar {
+      width: 30px; height: 30px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+    }
+    .msg-row.ai   .msg-avatar { background: var(--white); border: 1px solid var(--border); }
+    .msg-row.user .msg-avatar { background: var(--green); color: #0a0f1a; font-size: 11px; font-weight: 700; border-radius: 50%; }
+
+    .bubble {
+      max-width: 82%;
+      padding: 11px 15px;
+      font-size: 13.5px;
+      line-height: 1.68;
+      border-radius: 12px;
+    }
+    .msg-row.ai .bubble {
+      background: var(--white);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-top-left-radius: 4px;
+      box-shadow: var(--shadow);
+    }
+    .msg-row.user .bubble {
+      background: var(--user-bubble-bg);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      color: var(--user-bubble-txt);
+      border-top-right-radius: 4px;
+      border: 1px solid rgba(75,110,245,0.20);
+      font-weight: 400;
+    }
+
+    /* Source tags */
+    .src-tags {
+      display: flex; flex-wrap: wrap; gap: 5px;
+      margin-top: 9px;
+      padding-top: 9px;
+      border-top: 1px solid var(--src-sep);
+    }
+    .src-tag {
+      font-size: 10px;
+      background: var(--green-dim);
+      border: 1px solid rgba(7,237,65,0.15);
+      color: var(--green);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* Typing */
+    .typing-dots { display: flex; gap: 4px; padding: 4px 2px; align-items: center; }
+    .typing-dots span {
+      width: 5px; height: 5px;
+      background: #CCC;
+      border-radius: 50%;
+      animation: blink 1.3s infinite both;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink { 0%,80%,100%{opacity:.2;} 40%{opacity:1;} }
+
+    /* System msg */
+    .sys-msg {
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      padding: 4px;
+      animation: fadeUp .2s ease;
+    }
+
+    /* Input */
+    .input-area {
+      padding: 14px 24px 22px;
+      background: var(--main-bg);
+      flex-shrink: 0;
+    }
+    .input-inner { max-width: 720px; margin: 0 auto; }
+    .input-box {
+      display: flex;
+      align-items: center;
+      background: var(--white);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 5px 5px 5px 16px;
+      box-shadow: var(--shadow);
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .input-box:focus-within {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(0,217,126,.10);
+    }
+    .input-box textarea {
+      flex: 1;
+      border: none;
+      outline: none;
+      font-size: 13.5px;
+      font-family: inherit;
+      background: transparent;
+      resize: none;
+      line-height: 1.5;
+      padding: 8px 0;
+      max-height: 120px;
+      color: var(--text);
+    }
+    .input-box textarea::placeholder { color: #AAB; }
+    .input-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .attach-btn {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: none;
+      border: none;
+      color: var(--muted);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      transition: background .14s, color .14s;
+      font-size: 16px;
+    }
+    .attach-btn:hover { background: var(--main-bg); color: var(--text); }
+    .send-btn {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      background: var(--green);
+      border: none;
+      color: #0a0f1a;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background .15s, transform .1s;
+    }
+    .send-btn:hover { background: #00C070; transform: scale(1.05); }
+    .send-btn:disabled { background: #D0D2DC; cursor: default; transform: none; }
+    .send-btn svg { width: 14px; height: 14px; fill: currentColor; transform: translateX(1px); }
+
+    .ctx-hint { font-size: 11px; color: var(--muted); text-align: center; margin-top: 7px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       RIGHT PANEL — Sources
+    ═══════════════════════════════════════════════════════════════ */
+    .right-panel {
+      width: 260px;
+      min-width: 260px;
+      background: var(--nb-bg);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      transition: margin-right .28s ease, background 0.3s;
+    }
+    .right-panel.hidden { margin-right: -260px; }
+
+    .rp-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .rp-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
+    .rp-count {
+      background: var(--main-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 1px 7px;
+    }
+    .rp-toggle {
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      transition: background .14s;
+    }
+    .rp-toggle:hover { background: var(--main-bg); }
+
+    .rp-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
+
+    /* Empty state */
+    .rp-empty {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center;
+      height: 200px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .rp-empty .re-icon { font-size: 32px; margin-bottom: 10px; opacity: .5; }
+    .rp-empty p { font-size: 12px; line-height: 1.5; max-width: 160px; }
+
+    /* Source card */
+    .src-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-bottom: 6px;
+      background: var(--main-bg);
+      transition: border-color .14s, box-shadow .14s;
+      cursor: default;
+    }
+    .src-card:hover { border-color: #C8CAD6; box-shadow: var(--shadow); }
+    .src-card-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .src-card-info { flex: 1; min-width: 0; }
+    .src-card-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .src-card-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .src-card-badge {
+      font-size: 9px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .badge-indexed  { background: var(--badge-indexed-bg);  color: var(--badge-indexed-txt); }
+    .badge-indexing { background: var(--badge-indexing-bg); color: var(--badge-indexing-txt); }
+    .badge-failed   { background: var(--badge-failed-bg);   color: var(--badge-failed-txt); }
+    .badge-pending  { background: var(--badge-other-bg);    color: var(--badge-other-txt); }
+    .badge-empty    { background: var(--badge-other-bg);    color: var(--badge-other-txt); }
+
+    /* Add source button */
+    .btn-rp-add {
+      display: flex; align-items: center; gap: 7px;
+      width: 100%;
+      padding: 9px 12px;
+      background: none;
+      border: 1.5px dashed var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 4px;
+      transition: border-color .14s, color .14s, background .14s;
+    }
+    .btn-rp-add:hover { border-color: var(--green); color: #128B45; background: rgba(0,217,126,.04); }
+
+    /* No-notebook placeholder */
+    .rp-no-nb {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 24px;
+      color: var(--muted);
+    }
+    .rp-no-nb .nn-icon { font-size: 36px; margin-bottom: 12px; opacity: .4; }
+    .rp-no-nb p { font-size: 12px; line-height: 1.6; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 22px; left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--toast-bg); color: var(--toast-text);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      padding: 9px 18px; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      z-index: 9999;
+      opacity: 0; pointer-events: none;
+      transition: opacity .25s, transform .25s;
+      white-space: nowrap;
+      box-shadow: 0 4px 20px rgba(0,0,0,.3);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Theme toggle ── */
+    .theme-toggle-btn {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--nb-surface);
+      backdrop-filter: blur(8px);
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--muted);
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .theme-toggle-btn:hover { border-color: var(--green); color: var(--text); }
+
+    /* Hidden file input */
+    #fileInput { display: none; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════════════ LEFT PANEL ══════════════════ -->
+  <aside class="left-panel" id="leftPanel">
+
+    <div class="lp-header">
+      <div class="aiva-mark">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 22h4l2-4h8l2 4h4L12 2zm-2 10l2-5 2 5H10z"/></svg>
+      </div>
+      <div class="brand-text">
+        <strong>AIVA RAG</strong>
+        <span>Notebook Intelligence</span>
+      </div>
+    </div>
+
+    <!-- New notebook -->
+    <button class="btn-new" onclick="toggleNewInput()">
+      <span class="plus">+</span> New Notebook
+    </button>
+    <div class="new-nb-row" id="newNbRow">
+      <input id="newNbInput" placeholder="Notebook name…" maxlength="60"
+             onkeydown="newNbKey(event)" autocomplete="off"/>
+      <button onclick="createNotebook()">Create</button>
+    </div>
+
+    <!-- General mode -->
+    <div class="general-row active" id="generalRow" onclick="selectNotebook(null)">
+      <span class="gr-icon">🌐</span>
+      <span class="gr-label">General Mode</span>
+    </div>
+
+    <div class="lp-label">MY NOTEBOOKS</div>
+
+    <ul class="nb-list" id="nbList">
+      <!-- rendered by JS -->
+    </ul>
+
+    <div class="lp-footer">
+      <div class="user-pill">
+        <div class="u-avatar">A</div>
+        <span class="u-name">AIVA User</span>
+      </div>
+      <button class="btn-logout" onclick="window.location.href='/logout'">Logout</button>
+    </div>
+  </aside>
+
+  <!-- hidden file picker -->
+  <input type="file" id="fileInput" multiple
+    accept=".pdf,.pptx,.ppt,.docx,.doc,.txt,.md,.markdown,.xlsx,.xls"
+    onchange="handleFiles(event)"/>
+
+  <!-- ══════════════════ CENTER PANEL ══════════════════ -->
+  <main class="center-panel">
+
+    <header class="top-bar">
+      <div class="tb-left">
+        <div class="hamburger" id="menuToggle"
+             onclick="document.getElementById('leftPanel').classList.toggle('hidden')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </div>
+
+        <!-- Context indicator — switches between pill and select -->
+        <div class="ctx-pill" id="ctxPill" style="display:none;">
+          <span class="cp-icon" id="ctxIcon">📔</span>
+          <span class="cp-label" id="ctxLabel">Notebook</span>
+          <div class="cp-dot"></div>
+        </div>
+
+        <div class="mode-wrap" id="modeWrap">
+          <select class="mode-select" id="searchMode">
+            <option value="general_plus_docs">🌐 General + Docs</option>
+            <option value="documents_only">📄 Documents Only</option>
+            <option value="general_only">💬 General AI Only</option>
+          </select>
+          <span class="mode-caret">▼</span>
+        </div>
+      </div>
+
+      <div class="tb-right">
+        <div class="model-pill">
+          <div class="model-dot"></div>
+          <span id="modelLabel">Gemma-4-12B</span>
+        </div>
+        <button class="theme-toggle-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
+        <div class="icon-btn" title="Toggle sources panel"
+             onclick="document.getElementById('rightPanel').classList.toggle('hidden')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/>
+          </svg>
+        </div>
+      </div>
+    </header>
+
+    <!-- Messages -->
+    <div class="msgs-wrap" id="msgs">
+      <div class="welcome" id="welcome">
+        <span class="welcome-icon">📚</span>
+        <h1>AIVA Notebook RAG</h1>
+        <p>Create notebooks to organize your knowledge by topic. Upload documents into a notebook, then chat with them — like NotebookLM, but running locally.</p>
+        <div class="welcome-chips">
+          <button class="w-chip" onclick="setInput('What documents are available?')">What documents are available?</button>
+          <button class="w-chip" onclick="setInput('Summarise key topics across all sources')">Summarise key topics</button>
+          <button class="w-chip" onclick="setInput('What is agentic AI?')">What is agentic AI?</button>
+          <button class="w-chip" onclick="setInput('Give me an overview of my notebooks')">Overview of my notebooks</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="input-area">
+      <div class="input-inner">
+        <div class="input-box">
+          <textarea id="chatInput" rows="1" placeholder="Ask anything…"
+                    oninput="autoResize(this)" onkeydown="inputKey(event)"></textarea>
+          <div class="input-actions">
+            <button class="attach-btn" title="Upload to current notebook"
+                    onclick="triggerUpload()">📎</button>
+            <button class="send-btn" id="sendBtn" onclick="send()">
+              <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="ctx-hint" id="ctxHint">Searching across all documents</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ══════════════════ RIGHT PANEL ══════════════════ -->
+  <aside class="right-panel" id="rightPanel">
+
+    <div class="rp-header">
+      <div class="rp-title">
+        <span>📂</span>
+        <span id="rpTitle">Sources</span>
+        <span class="rp-count" id="rpCount">0</span>
+      </div>
+      <div class="rp-toggle" onclick="document.getElementById('rightPanel').classList.toggle('hidden')" title="Close">✕</div>
+    </div>
+
+    <div class="rp-body" id="rpBody">
+      <div class="rp-no-nb">
+        <div class="nn-icon">📔</div>
+        <p>Select a notebook to see its sources here</p>
+      </div>
+    </div>
+
+  </aside>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Theme toggle ────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const btn  = document.getElementById('themeToggle');
+  const isLight = html.getAttribute('data-theme') === 'light';
+  if (isLight) {
+    html.setAttribute('data-theme', 'dark');
+    if (btn) btn.textContent = '🌙';
+    localStorage.setItem('aiva-theme', 'dark');
+  } else {
+    html.setAttribute('data-theme', 'light');
+    if (btn) btn.textContent = '☀️';
+    localStorage.setItem('aiva-theme', 'light');
+  }
+}
+(function initTheme() {
+  const saved = localStorage.getItem('aiva-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+})();
+
+// ─────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────
+let notebooks      = [];      // [{id, name, sources, is_indexed, index_status, ...}]
+let activeNbId     = null;    // null = general mode
+let uploadTargetId = null;    // notebook receiving the next file upload
+let waiting        = false;
+let _pollTimer     = null;
+
+// ─────────────────────────────────────────────
+//  Toast
+// ─────────────────────────────────────────────
+let _toastTimer = null;
+function toast(msg, ms = 3200) {
+  clearTimeout(_toastTimer);
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  _toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// ─────────────────────────────────────────────
+//  Load notebooks
+// ─────────────────────────────────────────────
+async function loadNotebooks() {
+  try {
+    const r = await fetch('/api/agents');
+    if (!r.ok) return;
+    const d = await r.json();
+    notebooks = d.agents || [];
+    renderLeft();
+    renderRight();
+  } catch(e) { console.error('load notebooks', e); }
+}
+
+// ─────────────────────────────────────────────
+//  Render left panel
+// ─────────────────────────────────────────────
+function renderLeft() {
+  const ul = document.getElementById('nbList');
+  ul.innerHTML = '';
+  notebooks.forEach(nb => ul.appendChild(makeNbItem(nb)));
+}
+
+function statusBadge(nb) {
+  // returns {label, cssClass, spin}
+  const st = nb.index_status || (nb.is_indexed ? 'indexed' : 'pending');
+  if (st === 'indexed')  return { label: '✓ Indexed',  cls: 'badge-indexed',  spin: false };
+  if (st === 'indexing') return { label: '⟳ Indexing', cls: 'badge-indexing', spin: true  };
+  if (st === 'failed')   return { label: '✕ Failed',   cls: 'badge-failed',   spin: false };
+  return                        { label: '— Pending',  cls: 'badge-pending',  spin: false };
+}
+
+function makeNbItem(nb) {
+  const srcFiles = (nb.sources || []).filter(s => s.type === 'file');
+  const srcUrls  = (nb.sources || []).filter(s => s.type === 'url');
+  const total    = srcFiles.length + srcUrls.length;
+  const indexed  = nb.is_indexed;
+  const st       = nb.index_status || (indexed ? 'indexed' : 'pending');
+
+  const li = document.createElement('li');
+  li.className = 'nb-item' + (nb.id === activeNbId ? ' active' : '');
+  li.dataset.id = nb.id;
+
+  li.innerHTML = `
+    <div class="nb-row" data-id="${nb.id}">
+      <span class="nb-chevron">▶</span>
+      <span class="nb-book">📔</span>
+      <div class="nb-name-wrap">
+        <span class="nb-name" id="nbname-${eid(nb.id)}">${esc(nb.name)}</span>
+        <span class="nb-meta">${total} source${total !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="nb-actions">
+        <button class="nb-act" title="Rename" onclick="startRename('${nb.id}',event)">✏️</button>
+        <button class="nb-act del" title="Delete" onclick="deleteNb('${nb.id}',event)">🗑️</button>
+      </div>
+    </div>
+    <div class="nb-sources" id="nbsrc-${eid(nb.id)}">
+      ${st === 'indexing' ? `<div class="nb-indexing"><div class="spin"></div> Indexing…</div>` : ''}
+      ${st === 'failed'   ? `<div class="nb-indexing" style="color:var(--danger)">⚠ Index failed — try re-uploading</div>` : ''}
+      ${srcFiles.map(s => `
+        <div class="nb-src-item">
+          <span>${fileIcon(s.value)}</span>
+          <span class="nb-src-name" title="${esc(s.value)}">${esc(basename(s.value))}</span>
+        </div>`).join('')}
+      ${srcUrls.map(s => `
+        <div class="nb-src-item">
+          <span>🔗</span>
+          <span class="nb-src-name" title="${esc(s.value)}">${esc(s.value.slice(0,38))}…</span>
+        </div>`).join('')}
+      ${total === 0 ? `<div class="nb-empty">No sources yet</div>` : ''}
+      <button class="btn-add-src" onclick="triggerUploadFor('${nb.id}',event)">
+        <span>＋</span> Add sources
+      </button>
+    </div>`;
+
+  // Row click: select + toggle expand
+  li.querySelector('.nb-row').addEventListener('click', (e) => {
+    if (e.target.closest('.nb-actions')) return;
+    selectNotebook(nb.id);
+    li.classList.toggle('open');
+    // sync chevron
+    const ch = li.querySelector('.nb-chevron');
+    ch.style.transform = li.classList.contains('open') ? 'rotate(90deg)' : '';
+  });
+
+  return li;
+}
+
+// ─────────────────────────────────────────────
+//  Notebook selection
+// ─────────────────────────────────────────────
+function selectNotebook(id) {
+  activeNbId = id;
+
+  // Left panel highlights
+  document.getElementById('generalRow').classList.toggle('active', id === null);
+  document.querySelectorAll('.nb-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.id === id));
+
+  // Top bar
+  const pill   = document.getElementById('ctxPill');
+  const mode   = document.getElementById('modeWrap');
+  const ctxHint = document.getElementById('ctxHint');
+  const input   = document.getElementById('chatInput');
+
+  if (id === null) {
+    pill.style.display = 'none';
+    mode.style.display = '';
+    ctxHint.textContent = 'Searching across all documents';
+    input.placeholder  = 'Ask anything…';
+  } else {
+    const nb = notebooks.find(n => n.id === id);
+    document.getElementById('ctxIcon').textContent = '📔';
+    document.getElementById('ctxLabel').textContent = nb ? nb.name : id;
+    pill.style.display = '';
+    mode.style.display = 'none';
+    ctxHint.textContent = `Notebook: ${nb ? nb.name : id}`;
+    input.placeholder  = `Ask about "${nb ? nb.name : id}"…`;
+  }
+
+  // Right panel
+  renderRight();
+}
+
+// ─────────────────────────────────────────────
+//  Right panel (sources)
+// ─────────────────────────────────────────────
+function renderRight() {
+  const body    = document.getElementById('rpBody');
+  const title   = document.getElementById('rpTitle');
+  const count   = document.getElementById('rpCount');
+
+  if (activeNbId === null) {
+    title.textContent = 'Sources';
+    count.textContent = '—';
+    body.innerHTML = `
+      <div class="rp-no-nb">
+        <div class="nn-icon">📔</div>
+        <p>Select a notebook to see its sources here</p>
+      </div>`;
+    return;
+  }
+
+  const nb = notebooks.find(n => n.id === activeNbId);
+  if (!nb) return;
+
+  const sources  = nb.sources || [];
+  const binfo    = statusBadge(nb);
+  title.textContent = nb.name;
+  count.textContent = sources.length;
+
+  if (sources.length === 0) {
+    body.innerHTML = `
+      <div class="rp-empty">
+        <div class="re-icon">📭</div>
+        <p>No sources yet. Add files or URLs to this notebook.</p>
+      </div>
+      <button class="btn-rp-add" onclick="triggerUploadFor('${activeNbId}',event)">
+        <span>＋</span> Add sources
+      </button>`;
+    return;
+  }
+
+  let html = '';
+  if (binfo.spin) {
+    html += `<div class="nb-indexing" style="margin-bottom:8px;">
+               <div class="spin"></div> Indexing sources — please wait…
+             </div>`;
+  }
+  if (nb.index_status === 'failed') {
+    const err = nb.index_error ? esc(nb.index_error.slice(0, 120)) : 'Unknown error';
+    html += `<div style="font-size:11px;color:var(--danger);background:rgba(255,90,101,.07);
+               border:1px solid rgba(255,90,101,.2);border-radius:7px;padding:8px 10px;margin-bottom:8px;">
+               ⚠ Indexing failed: ${err}<br>
+               <span style="color:var(--muted)">Re-upload the file to retry.</span>
+             </div>`;
+  }
+
+  sources.forEach(s => {
+    const isFile = s.type === 'file';
+    const name   = isFile ? basename(s.value) : s.value;
+    const icon   = isFile ? fileIcon(s.value) : '🔗';
+    const ext    = isFile ? s.value.split('.').pop().toUpperCase() : 'URL';
+    const badge  = `<span class="src-card-badge ${binfo.cls}">${binfo.label}</span>`;
+
+    html += `
+      <div class="src-card">
+        <div class="src-card-icon">${icon}</div>
+        <div class="src-card-info">
+          <div class="src-card-name" title="${esc(name)}">${esc(name.length > 28 ? name.slice(0,28)+'…' : name)}</div>
+          <div class="src-card-meta">${ext} &nbsp;${badge}</div>
+        </div>
+      </div>`;
+  });
+
+  html += `<button class="btn-rp-add" onclick="triggerUploadFor('${activeNbId}',event)">
+             <span>＋</span> Add more sources
+           </button>`;
+  body.innerHTML = html;
+}
+
+// ─────────────────────────────────────────────
+//  Create notebook
+// ─────────────────────────────────────────────
+function toggleNewInput() {
+  const row = document.getElementById('newNbRow');
+  const isVisible = row.classList.contains('visible');
+  row.classList.toggle('visible', !isVisible);
+  if (!isVisible) document.getElementById('newNbInput').focus();
+  else document.getElementById('newNbInput').value = '';
+}
+
+function newNbKey(e) {
+  if (e.key === 'Enter')  { e.preventDefault(); createNotebook(); }
+  if (e.key === 'Escape') { toggleNewInput(); }
+}
+
+async function createNotebook() {
+  const name = document.getElementById('newNbInput').value.trim();
+  if (!name) { document.getElementById('newNbInput').focus(); return; }
+
+  const keywords = name.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (!keywords.length) keywords.push(name.toLowerCase());
+
+  try {
+    const r = await fetch('/api/agents', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, description: `Notebook: ${name}`, keywords }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Create failed');
+
+    document.getElementById('newNbInput').value = '';
+    document.getElementById('newNbRow').classList.remove('visible');
+    await loadNotebooks();
+    selectNotebook(d.agent.id);
+
+    // auto-expand the new item
+    const li = document.querySelector(`.nb-item[data-id="${d.agent.id}"]`);
+    if (li) { li.classList.add('open'); li.querySelector('.nb-chevron').style.transform = 'rotate(90deg)'; }
+
+    toast(`✅ Notebook "${name}" created`);
+  } catch(e) { toast(`⚠️ ${e.message}`); }
+}
+
+// ─────────────────────────────────────────────
+//  Rename
+// ─────────────────────────────────────────────
+function startRename(id, e) {
+  e.stopPropagation();
+  const span = document.getElementById(`nbname-${eid(id)}`);
+  const cur  = span.textContent;
+
+  const inp = document.createElement('input');
+  inp.className = 'nb-rename-input';
+  inp.value = cur;
+  span.replaceWith(inp);
+  inp.focus(); inp.select();
+
+  async function save() {
+    const newName = inp.value.trim() || cur;
+    const span2 = document.createElement('span');
+    span2.className = 'nb-name';
+    span2.id = `nbname-${eid(id)}`;
+    span2.textContent = newName;
+    inp.replaceWith(span2);
+    if (newName === cur) return;
+    try {
+      const r = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name: newName }),
+      });
+      if (!r.ok) throw new Error('Rename failed');
+      await loadNotebooks();
+      if (activeNbId === id) selectNotebook(id);
+      toast(`✅ Renamed to "${newName}"`);
+    } catch(ex) { toast(`⚠️ ${ex.message}`); }
+  }
+
+  inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter')  { ev.preventDefault(); inp.blur(); }
+    if (ev.key === 'Escape') { inp.value = cur; inp.blur(); }
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Delete
+// ─────────────────────────────────────────────
+async function deleteNb(id, e) {
+  e.stopPropagation();
+  const nb = notebooks.find(n => n.id === id);
+  if (!confirm(`Delete notebook "${nb?.name}"?\nThis cannot be undone.`)) return;
+  try {
+    await fetch(`/api/agents/${id}`, { method: 'DELETE' });
+    if (activeNbId === id) selectNotebook(null);
+    await loadNotebooks();
+    toast('🗑️ Notebook deleted');
+  } catch(ex) { toast(`⚠️ ${ex.message}`); }
+}
+
+// ─────────────────────────────────────────────
+//  File upload
+// ─────────────────────────────────────────────
+function triggerUpload() {
+  uploadTargetId = activeNbId;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('fileInput').click();
+}
+
+function triggerUploadFor(id, e) {
+  if (e) e.stopPropagation();
+  uploadTargetId = id;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('fileInput').click();
+}
+
+async function handleFiles(e) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  const tid = uploadTargetId;
+
+  for (const file of files) {
+    if (tid) {
+      await uploadToNotebook(file, tid);
+    } else {
+      await uploadGeneral(file);
+    }
+  }
+  await loadNotebooks();
+  pollIndexStatus();
+}
+
+async function uploadToNotebook(file, nbId) {
+  const nb = notebooks.find(n => n.id === nbId);
+  sysMsg(`Uploading "${file.name}" to "${nb?.name}"…`);
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`/api/agents/${nbId}/upload-source`, { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Upload failed');
+    sysMsg(`✅ "${file.name}" added — indexing in background`);
+  } catch(ex) {
+    sysMsg(`⚠️ Upload failed: ${ex.message}`);
+  }
+}
+
+async function uploadGeneral(file) {
+  sysMsg(`Uploading "${file.name}"…`);
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Upload failed');
+    sysMsg(`✅ "${file.name}" uploaded and processed`);
+  } catch(ex) {
+    sysMsg(`⚠️ Upload failed: ${ex.message}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Chat
+// ─────────────────────────────────────────────
+function setInput(txt) {
+  document.getElementById('chatInput').value = txt;
+  autoResize(document.getElementById('chatInput'));
+  send();
+}
+
+function inputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function sysMsg(text) {
+  dismissWelcome();
+  const el = document.createElement('div');
+  el.className = 'sys-msg';
+  el.textContent = text;
+  document.getElementById('msgs').appendChild(el);
+  scrollMsgs();
+}
+
+function appendMsg(role, html, sources = []) {
+  dismissWelcome();
+  const msgs = document.getElementById('msgs');
+  const row  = document.createElement('div');
+  row.className = `msg-row ${role}`;
+
+  const av = document.createElement('div');
+  av.className = 'msg-avatar';
+  av.innerHTML = role === 'ai' ? '🤖' : 'A';
+
+  const bub = document.createElement('div');
+  bub.className = 'bubble';
+  bub.innerHTML = html;
+
+  if (role === 'ai' && sources.length > 0) {
+    const bar = document.createElement('div');
+    bar.className = 'src-tags';
+    [...new Set(sources)].slice(0,4).forEach(s => {
+      const t = document.createElement('span');
+      t.className = 'src-tag';
+      t.textContent = s;
+      bar.appendChild(t);
+    });
+    bub.appendChild(bar);
+  }
+
+  row.appendChild(av); row.appendChild(bub);
+  msgs.appendChild(row);
+  scrollMsgs();
+  return bub;
+}
+
+function showTyping() {
+  dismissWelcome();
+  const msgs = document.getElementById('msgs');
+  const row  = document.createElement('div');
+  row.className = 'msg-row ai'; row.id = 'typing';
+  row.innerHTML = `<div class="msg-avatar">🤖</div>
+    <div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  msgs.appendChild(row); scrollMsgs();
+}
+function hideTyping() { document.getElementById('typing')?.remove(); }
+function scrollMsgs() {
+  const m = document.getElementById('msgs');
+  m.scrollTop = m.scrollHeight;
+}
+function dismissWelcome() { document.getElementById('welcome')?.remove(); }
+
+async function send() {
+  if (waiting) return;
+  const ta   = document.getElementById('chatInput');
+  const text = ta.value.trim();
+  if (!text) return;
+
+  ta.value = ''; ta.style.height = 'auto';
+  waiting  = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  appendMsg('user', mdToHtml(text));
+  showTyping();
+
+  try {
+    const body = {
+      message:     text,
+      stream:      false,
+      search_mode: activeNbId ? 'documents_only' : document.getElementById('searchMode')?.value || 'general_plus_docs',
+    };
+    if (activeNbId) body.notebook_id = activeNbId;
+
+    const r = await fetch('/api/chat', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(body),
+    });
+    hideTyping();
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `HTTP ${r.status}`);
+    }
+
+    const data    = await r.json();
+    const sources = (data.sources || [])
+      .map(s => s.document_title || s.source_document || s.agent_name || s.document || '')
+      .filter(Boolean);
+
+    appendMsg('ai', mdToHtml(data.response || 'No response.'), sources);
+  } catch(ex) {
+    hideTyping();
+    appendMsg('ai', `⚠️ ${esc(ex.message)}`);
+  }
+
+  waiting = false;
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('chatInput').focus();
+}
+
+// ─────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function eid(id) { return id.replace(/[^a-zA-Z0-9_-]/g,'_'); }
+
+function mdToHtml(text) {
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,     '<em>$1</em>')
+    .replace(/`([^`]+)`/g,     '<code style="background:#F0F1F5;padding:1px 5px;border-radius:4px;font-size:12px;font-family:monospace;">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+function basename(p) {
+  return (p || '').replace(/\\/g,'/').split('/').pop();
+}
+
+function fileIcon(p) {
+  const ext = (p || '').split('.').pop().toLowerCase();
+  return { pdf:'📄', docx:'📝', doc:'📝', pptx:'📊', ppt:'📊',
+           xlsx:'📋', xls:'📋', txt:'📃', md:'📑', markdown:'📑' }[ext] || '📄';
+}
+
+// ─────────────────────────────────────────────
+//  Smart index-status polling
+// ─────────────────────────────────────────────
+async function pollIndexStatus() {
+  clearTimeout(_pollTimer);
+
+  // Find any notebook that is currently indexing
+  const indexing = notebooks.filter(n =>
+    n.index_status === 'indexing' || (!n.is_indexed && n.index_status !== 'failed'));
+
+  if (indexing.length === 0) return; // Nothing to poll
+
+  // Check each one via the lightweight endpoint
+  let anyChanged = false;
+  for (const nb of indexing) {
+    try {
+      const r = await fetch(`/api/agents/${nb.id}/index-status`);
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (d.index_status !== nb.index_status || d.is_indexed !== nb.is_indexed) {
+        anyChanged = true;
+        nb.index_status = d.index_status;
+        nb.is_indexed   = d.is_indexed;
+        nb.index_error  = d.index_error || '';
+      }
+    } catch(e) { /* network hiccup — ignore */ }
+  }
+
+  if (anyChanged) {
+    renderLeft();
+    if (activeNbId && indexing.some(n => n.id === activeNbId)) {
+      renderRight();
+    }
+  }
+
+  // Still indexing? Poll again in 3 s; otherwise stop
+  const stillActive = notebooks.some(n =>
+    n.index_status === 'indexing' || (!n.is_indexed && n.index_status !== 'failed'));
+  if (stillActive) {
+    _pollTimer = setTimeout(pollIndexStatus, 3000);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Init
+// ─────────────────────────────────────────────
+loadNotebooks().then(pollIndexStatus);
+</script>
+</body>
+</html>
