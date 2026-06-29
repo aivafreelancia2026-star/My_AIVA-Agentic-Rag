@@ -782,8 +782,8 @@ def get_managers_and_llm():
     state_data = get_system_state()
     system_initialized, initialization_error, doc_manager, context_manager, _, _, _ = state_data
     if not system_initialized and not initialization_error:
-        # Wait up to 45 s for the background init thread to finish
-        deadline = _t.time() + 45
+        # Wait up to 90 s for the background init thread to finish
+        deadline = _t.time() + 90
         while _t.time() < deadline:
             _t.sleep(1)
             state_data = get_system_state()

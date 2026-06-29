@@ -105,26 +105,23 @@ def initialize_system():
         # Local (PC):     uses HuggingFaceEmbeddings with local sentence-transformers
         hf_api_key = getattr(app_config, "HF_API_KEY", "") or os.getenv("HF_API_KEY", "")
         if hf_api_key:
-            print("🌐 Using HuggingFace Inference API for embeddings (cloud mode)...")
+            print("⏳ Step 1/4: HuggingFace Inference API embeddings (cloud mode)...")
             try:
-                from langchain_core.embeddings import Embeddings as _BaseEmb
                 from huggingface_hub import InferenceClient as _IClient
                 import numpy as _np
 
-                class _HFInferenceEmbeddings(_BaseEmb):
-                    """Lightweight HF Inference API embeddings — no torch needed."""
+                # Plain class — no langchain abstract base needed, FAISS uses duck-typing
+                class _HFInferenceEmbeddings:
                     def __init__(self, api_key: str, model: str):
                         self._client = _IClient(api_key=api_key)
                         self._model = model
 
                     def _encode(self, text: str) -> list:
                         result = self._client.feature_extraction(text, model=self._model)
-                        if hasattr(result, "tolist"):
-                            arr = _np.array(result)
-                            if arr.ndim == 2:
-                                arr = arr.mean(axis=0)
-                            return arr.tolist()
-                        return list(result)
+                        arr = _np.array(result)
+                        if arr.ndim == 2:
+                            arr = arr.mean(axis=0)
+                        return arr.tolist()
 
                     def embed_documents(self, texts):
                         return [self._encode(t) for t in texts]
@@ -163,7 +160,7 @@ def initialize_system():
                     raise Exception(f"Failed to load any embedding model: {e2}")
         
         # Initialize LLM via LM Studio's OpenAI-compatible endpoint
-        print("Initializing language model...")
+        print("⏳ Step 2/4: Initializing language model...")
         try:
             lm_studio_base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
             llm_base_url = f"{lm_studio_base_url.rstrip('/')}/v1"
@@ -176,37 +173,35 @@ def initialize_system():
                 max_tokens=getattr(app_config, "LM_STUDIO_MAX_TOKENS", 2048),
             )
 
-            print(f"✅ Language model initialized: {app_config.LLM_MODEL} @ {llm_base_url}")
+            print(f"✅ LLM client created: {app_config.LLM_MODEL}")
 
         except Exception as e:
-            print(f"⚠️  Warning: LLM initialization failed: {e}")
-            print("   The system will continue with document search only (no LLM responses)")
-            llm = None  # Continue without LLM
-        
+            print(f"⚠️  LLM init skipped (will use Groq fallback): {e}")
+            llm = None
+
         # Initialize managers
+        print("⏳ Step 3/4: Creating document manager...")
         os.makedirs(app_config.EMBEDDINGS_DIR, exist_ok=True)
         doc_manager = AdvancedDocumentManager(app_config.EMBEDDINGS_DIR, embedding_model=embedding_model)
         context_manager = EnhancedConversationContext()
-        
-        # Auto-load documents if available (with timeout to prevent blocking)
-        print("Loading documents...")
+
+        # Load documents — short timeout so init doesn't hang on empty dir
+        print("⏳ Step 4/4: Loading documents...")
         from threading import Thread
         import time
-        
-        def load_docs_with_timeout(timeout_seconds=60):
-            """Load documents with a timeout to prevent blocking"""
+
+        def _load_docs():
             try:
                 doc_manager.load_all_documents()
             except Exception as e:
-                print(f"⚠️  Warning: Document loading failed: {e}")
-        
-        # Try to load documents with a timeout
-        doc_thread = Thread(target=load_docs_with_timeout, daemon=True)
+                print(f"⚠️  Document loading failed: {e}")
+
+        doc_thread = Thread(target=_load_docs, daemon=True)
         doc_thread.start()
-        doc_thread.join(timeout=60)  # Wait max 60 seconds for document loading
-        
+        doc_thread.join(timeout=10)  # 10 s max — empty dir returns instantly
+
         if doc_thread.is_alive():
-            print("⚠️  Warning: Document loading timed out (60s), continuing without full documents")
+            print("⚠️  Document loading taking >10s, continuing in background")
         
         system_initialized = True
         print("✅ System initialization complete")
