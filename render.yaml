@@ -19,3 +19,9 @@ services:
         value: https://api.groq.com/openai/v1
       - key: LM_STUDIO_BASE_URL
         value: http://127.0.0.1:1234
+      - key: ALLOWED_ORIGINS
+        value: https://aiva-agentic-rag.onrender.com
+      - key: HTTPS
+        value: "true"
+      - key: FLASK_SECRET_KEY
+        sync: false

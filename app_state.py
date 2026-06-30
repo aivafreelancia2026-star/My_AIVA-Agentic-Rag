@@ -111,13 +111,22 @@ def initialize_system():
                 import numpy as _np
 
                 # Plain class — no langchain abstract base needed, FAISS uses duck-typing
+                # Client is created lazily on first use to avoid blocking during startup.
                 class _HFInferenceEmbeddings:
                     def __init__(self, api_key: str, model: str):
-                        self._client = _IClient(api_key=api_key)
+                        self._api_key = api_key
                         self._model = model
+                        self._client = None  # created on first call
+
+                    def _get_client(self):
+                        if self._client is None:
+                            self._client = _IClient(token=self._api_key)
+                        return self._client
 
                     def _encode(self, text: str) -> list:
-                        result = self._client.feature_extraction(text, model=self._model)
+                        result = self._get_client().feature_extraction(
+                            text, model=self._model
+                        )
                         arr = _np.array(result)
                         if arr.ndim == 2:
                             arr = arr.mean(axis=0)

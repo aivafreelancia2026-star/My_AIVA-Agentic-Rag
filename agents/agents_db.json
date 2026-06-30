@@ -1,29 +1,21 @@
 [
   {
-    "id": "aiva_cintext",
-    "name": "Aiva cintext",
-    "description": "Notebook: Aiva cintext",
+    "id": "test_123",
+    "name": "test 123",
+    "description": "Notebook: test 123",
     "keywords": [
-      "aiva",
-      "cintext"
+      "test",
+      "123"
     ],
     "sources": [
       {
         "type": "file",
-        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\internship_company_rankings.xlsx"
-      },
-      {
-        "type": "file",
-        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\DEV DUO Hackathon.pdf"
-      },
-      {
-        "type": "file",
-        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\Poojitha_Resume.docx"
+        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\test_123\\AUDIT_REPORT.md"
       }
     ],
     "enabled": true,
     "refresh_hours": 24,
-    "created_at": "2026-06-29T11:54:14.679050",
-    "last_indexed": "2026-06-29T11:54:57.079938"
+    "created_at": "2026-06-30T10:04:38.894344",
+    "last_indexed": "2026-06-30T10:07:29.543996"
   }
 ]
