@@ -31,17 +31,11 @@ def api_status():
             'status': 'ready',
             'message': f'System is ready. {loaded_count} document(s) loaded.',
             'loaded_documents_count': loaded_count,
-            'llm_model': app_config.LLM_MODEL,
-            'embed_model': app_config.EMBED_MODEL,
-            'device': app_config.DEVICE,
-            'user_designation': session.get('user_designation', 'Unknown')
+            'user_designation': session.get('user_designation') or None,
         })
     except Exception as e:
         logger.error(f"Error in /api/status: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': f'Internal server error: {str(e)}'
-        }), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 @system_bp.route('/statistics', methods=['GET'])
 @require_login

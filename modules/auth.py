@@ -50,9 +50,11 @@ def get_user_access(designation):
 
 
 def require_login(f):
-    """No-op decorator — authentication disabled, all routes are public."""
+    """Enforce session-based authentication on a route."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if not session.get('user_designation'):
+            return jsonify({'error': 'Authentication required', 'code': 'UNAUTHENTICATED'}), 401
         return f(*args, **kwargs)
     return decorated_function
 

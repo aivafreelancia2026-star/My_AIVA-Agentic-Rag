@@ -472,8 +472,9 @@ class AdvancedDocumentManager:
     def _load_single_document_enhanced(self, folder_path: str) -> Tuple[Any, Dict, Dict]:
         """Load document with comprehensive metadata and statistics"""
         try:
-            # Load FAISS database
-            db = FAISS.load_local(folder_path, embedding_model, allow_dangerous_deserialization=True)
+            # Load FAISS database — validated against the trusted embeddings directory
+            from modules.document_manager import _safe_faiss_load
+            db = _safe_faiss_load(FAISS, folder_path, embedding_model, str(config.EMBEDDINGS_DIR))
             
             # Initialize metadata and statistics
             metadata = {'author': 'Unknown', 'title': 'Unknown', 'images': [], 'total_pages': 0}

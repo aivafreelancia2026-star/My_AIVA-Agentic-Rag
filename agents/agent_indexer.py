@@ -52,7 +52,46 @@ def read_index_status(agent_id: str) -> Dict:
 
 # ── URL scraping ──────────────────────────────────────────────────────────────
 
+import ipaddress as _ipaddress
+import socket as _socket
+from urllib.parse import urlparse as _urlparse
+
+_BLOCKED_NETWORKS = [
+    _ipaddress.ip_network("127.0.0.0/8"),
+    _ipaddress.ip_network("10.0.0.0/8"),
+    _ipaddress.ip_network("172.16.0.0/12"),
+    _ipaddress.ip_network("192.168.0.0/16"),
+    _ipaddress.ip_network("169.254.0.0/16"),
+    _ipaddress.ip_network("::1/128"),
+    _ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _is_ssrf_safe(url: str) -> bool:
+    """Return True only if the URL resolves to a public IP on http/https."""
+    try:
+        parsed = _urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        addrs = _socket.getaddrinfo(hostname, None)
+        for *_, sockaddr in addrs:
+            ip = _ipaddress.ip_address(sockaddr[0])
+            if any(ip in net for net in _BLOCKED_NETWORKS):
+                logger.warning("[indexer] SSRF blocked: %s resolved to %s", url, ip)
+                return False
+        return True
+    except (_socket.gaierror, ValueError) as exc:
+        logger.warning("[indexer] SSRF check failed for %s: %s", url, exc)
+        return False
+
+
 def _scrape_url(url: str) -> str:
+    if not _is_ssrf_safe(url):
+        logger.warning("[indexer] URL blocked by SSRF guard: %s", url)
+        return ""
     try:
         import requests
         from html.parser import HTMLParser
@@ -347,11 +386,8 @@ def load_agent_index(agent_id: str, embedding_model):
         faiss_path = _agent_index_dir(agent_id) / "faiss_index"
         if not faiss_path.exists():
             return None
-        return FAISS.load_local(
-            str(faiss_path),
-            embedding_model,
-            allow_dangerous_deserialization=True,
-        )
+        from modules.document_manager import _safe_faiss_load
+        return _safe_faiss_load(FAISS, str(faiss_path), embedding_model, str(INDEXES_DIR))
     except Exception as e:
         logger.warning(f"[indexer] Could not load index for '{agent_id}': {e}")
         return None
@@ -369,9 +405,9 @@ def search_agent_index(
     filter_files: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Search a single agent's FAISS index. Returns list of {text, source, score}."""
-    print(f"DEBUG: search_agent_index called with filter_files: {filter_files}")
+    logger.debug("search_agent_index called with filter_files: %s", filter_files)
     if filter_files is not None and len(filter_files) == 0:
-        print("DEBUG: filter_files is empty list, returning empty results immediately")
+        logger.debug("filter_files is empty list, returning empty results immediately")
         return []
     vs = load_agent_index(agent_id, embedding_model)
     if vs is None:
@@ -381,17 +417,15 @@ def search_agent_index(
         if filter_files is not None:
             search_filter = lambda metadata: metadata.get("source") in filter_files
         results = vs.similarity_search_with_score(query, k=k, filter=search_filter)
-        print(f"DEBUG: search_agent_index found {len(results)} results")
-        for doc, score in results:
-            print(f"  Found doc source: {doc.metadata.get('source')} | score: {score}")
-        
+        logger.debug("search_agent_index found %d results", len(results))
+
         # Defensive post-filtering to be absolutely sure no unselected files slip through
         if filter_files is not None:
             results = [
                 (doc, score) for doc, score in results
                 if doc.metadata.get("source") in filter_files
             ]
-            print(f"DEBUG: after post-filtering, {len(results)} results remain")
+            logger.debug("after post-filtering, %d results remain", len(results))
 
         return [
             {

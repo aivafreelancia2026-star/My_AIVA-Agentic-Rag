@@ -24,7 +24,7 @@ hf-xet==1.3.2
 httpcore==1.0.9
 httpx==0.28.1
 httpx-sse==0.4.3
-huggingface_hub
+huggingface_hub==0.30.2
 idna==3.11
 itsdangerous==2.2.0
 Jinja2==3.1.6
@@ -34,8 +34,8 @@ jsonpointer==3.0.0
 langchain-classic==1.0.1
 langchain-community==0.4.1
 langchain-core==1.2.16
-langchain-huggingface
-langchain-openai>=0.3.0
+langchain-huggingface==0.1.2
+langchain-openai==0.3.14
 langchain-text-splitters==1.1.1
 langsmith==0.7.9
 markdown-it-py==4.0.0
@@ -80,10 +80,10 @@ SQLAlchemy==2.0.47
 sympy==1.14.0
 tenacity==9.1.4
 threadpoolctl==3.6.0
-tokenizers
+tokenizers==0.21.2
 # torch removed — not needed when using HuggingFace Inference API for embeddings
 tqdm==4.67.3
-transformers
+transformers==4.48.3
 
 typer==0.24.1
 typer-slim==0.24.0

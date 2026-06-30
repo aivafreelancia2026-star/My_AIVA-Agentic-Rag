@@ -231,10 +231,39 @@ def upload_source_file(agent_id):
     if not f.filename:
         return jsonify({"error": "Empty filename"}), 400
 
+    from werkzeug.utils import secure_filename
+    from pathlib import Path as _Path
+
+    _ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.csv', '.md', '.docx', '.xlsx', '.pptx'}
+    _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+    # Magic-byte prefixes for allowed binary types
+    _MAGIC = {
+        b'%PDF': '.pdf',
+        b'PK\x03\x04': None,  # ZIP-based: docx/xlsx/pptx — validated by extension
+    }
+
+    filename = secure_filename(f.filename)
+    if not filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    ext = _Path(filename).suffix.lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        return jsonify({"error": f"File type not allowed. Permitted: {', '.join(_ALLOWED_EXTENSIONS)}"}), 400
+
+    # Read once to enforce size limit before writing to disk
+    data = f.read(_MAX_UPLOAD_BYTES + 1)
+    if len(data) > _MAX_UPLOAD_BYTES:
+        return jsonify({"error": "File exceeds 50 MB limit"}), 413
+
+    # Magic-byte check for binary types
+    if ext == '.pdf' and not data.startswith(b'%PDF'):
+        return jsonify({"error": "File content does not match declared type"}), 400
+    if ext in {'.docx', '.xlsx', '.pptx'} and not data.startswith(b'PK\x03\x04'):
+        return jsonify({"error": "File content does not match declared type"}), 400
+
     save_dir = UPLOADS_DIR / agent_id
     save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / f.filename
-    f.save(str(save_path))
+    save_path = save_dir / filename
+    save_path.write_bytes(data)
 
     # Append source to agent
     sources = agent.get("sources", [])
@@ -247,7 +276,7 @@ def upload_source_file(agent_id):
         mgr.ensure_indexed(agent_id, force=True)
 
     return jsonify({
-        "message": f"File '{f.filename}' uploaded and indexing started.",
+        "message": f"File '{filename}' uploaded and indexing started.",
         "file_path": str(save_path),
     })
 

@@ -1620,7 +1620,10 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
 
     agent = get_agent(notebook_id)
     if agent is None:
-        return jsonify({'error': f'Notebook "{notebook_id}" not found'}), 404
+        return jsonify({'error': 'Notebook not found'}), 404
+
+    if not agent.get('enabled', True):
+        return jsonify({'error': 'This notebook is not available'}), 403
 
     mgr = get_agent_manager()
     if mgr is None:
@@ -1652,8 +1655,9 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
             'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': [{'type':'text','content':no_ctx}]
         })
 
+    safe_notebook_name = re.sub(r'[^\w\s\-]', '', agent.get('name', ''))[:100]
     prompt = _NOTEBOOK_PROMPT.format(
-        notebook_name=agent['name'],
+        notebook_name=safe_notebook_name,
         context=context_str,
         question=user_message,
     )

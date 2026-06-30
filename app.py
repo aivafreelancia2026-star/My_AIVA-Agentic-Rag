@@ -10,7 +10,7 @@ import mimetypes
 from pathlib import Path
 from threading import Thread
 
-from flask import Flask, jsonify, send_file, abort, make_response
+from flask import Flask, jsonify, send_file, abort, make_response, request
 from flask_session import Session
 from werkzeug.exceptions import NotFound
 
@@ -27,12 +27,23 @@ app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Sessions
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'default-stable-secret-key-for-kb-bot')
+_flask_secret = os.environ.get('FLASK_SECRET_KEY')
+if not _flask_secret:
+    raise RuntimeError(
+        "FLASK_SECRET_KEY environment variable must be set before starting the server. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+app.secret_key = _flask_secret
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
 app.config['SESSION_FILE_DIR'] = os.path.join(os.path.dirname(__file__), 'sessions')
 app.config['SESSION_FILE_THRESHOLD'] = 100
 os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
+# Secure cookie flags
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Set SECURE only in production (HTTPS=true env var); default off for local dev
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('HTTPS', 'false').lower() == 'true'
 
 # -------------------------------------------------------
 # Public Embedding Asset Route (no auth)
@@ -56,7 +67,9 @@ def serve_embedding_asset(filename: str):
     abs_path = (base_dir / safe_rel).resolve()
 
     # stay inside base_dir
-    if not str(abs_path).startswith(str(base_dir) + os.sep):
+    try:
+        abs_path.relative_to(base_dir)
+    except ValueError:
         abort(403)
 
     if not abs_path.is_file():
@@ -116,13 +129,38 @@ from routes.file_routes import file_bp
 app.register_blueprint(file_bp)
 
 # -------------------------------------------------------
-# CORS (dev)
+# CORS / CSRF — allowed origins (must be defined before hooks)
 # -------------------------------------------------------
+_ALLOWED_ORIGINS = {
+    o.strip()
+    for o in os.environ.get('ALLOWED_ORIGINS', 'http://localhost:9072').split(',')
+    if o.strip()
+}
+
+# -------------------------------------------------------
+# CSRF protection — reject cross-origin mutating requests
+# -------------------------------------------------------
+@app.before_request
+def csrf_origin_check():
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return
+    origin = request.headers.get('Origin', '')
+    if origin and origin not in _ALLOWED_ORIGINS:
+        return jsonify({'error': 'Forbidden'}), 403
+
+# -------------------------------------------------------
+# CORS — restrict to known origins only
+# -------------------------------------------------------
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    origin = request.headers.get('Origin', '')
+    if origin in _ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+        response.headers['Vary'] = 'Origin'
     return response
 
 # -------------------------------------------------------

@@ -5,6 +5,8 @@ Handles login, logout, and access data endpoints.
 """
 
 import logging
+import time
+import threading
 from flask import Blueprint, request, jsonify, render_template, session, redirect, url_for
 from modules.auth import (
     load_access_data, 
@@ -17,6 +19,23 @@ from modules.auth import (
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
+
+# ── Simple in-memory rate limiter for login ───────────────────────────────────
+_login_attempts: dict = {}
+_login_lock = threading.Lock()
+_RATE_LIMIT_WINDOW = 60   # seconds
+_RATE_LIMIT_MAX    = 5    # attempts per window per IP
+
+def _login_rate_limit_ok(ip: str) -> bool:
+    now = time.time()
+    with _login_lock:
+        history = [t for t in _login_attempts.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
+        if len(history) >= _RATE_LIMIT_MAX:
+            _login_attempts[ip] = history
+            return False
+        history.append(now)
+        _login_attempts[ip] = history
+        return True
 
 
 @auth_bp.route('/')
@@ -66,6 +85,9 @@ def aiva():
 @auth_bp.route('/api/login', methods=['POST'])
 def api_login():
     """Handle user login"""
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+    if not _login_rate_limit_ok(client_ip):
+        return jsonify({'error': 'Too many login attempts. Please wait and try again.'}), 429
     try:
         data = request.get_json()
         if not data or 'designation' not in data:
@@ -88,7 +110,7 @@ def api_login():
         
     except Exception as e:
         logger.error(f"Login API error: {e}")
-        return jsonify({'error': 'Login failed', 'message': str(e)}), 500
+        return jsonify({'error': 'Login failed'}), 500
 
 
 @auth_bp.route('/api/logout', methods=['POST'])
@@ -99,15 +121,15 @@ def api_logout():
         return jsonify({'message': 'Logged out successfully', 'redirect_url': url_for('auth.login')})
     except Exception as e:
         logger.error(f"Logout API error: {e}")
-        return jsonify({'error': 'Logout failed', 'message': str(e)}), 500
+        return jsonify({'error': 'Logout failed'}), 500
 
 
 @auth_bp.route('/api/access-data')
 def api_access_data():
-    """Get access data for login page"""
+    """Return valid designation names for the login page dropdown — no access matrix."""
     try:
         access_data = load_access_data()
-        return jsonify({'access_data': access_data})
+        return jsonify({'designations': list(access_data.keys())})
     except Exception as e:
         logger.error(f"Access data API error: {e}")
-        return jsonify({'error': 'Failed to load access data', 'message': str(e)}), 500
+        return jsonify({'error': 'Failed to load access data'}), 500

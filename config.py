@@ -271,7 +271,7 @@ class RAGConfig:
     # Confidence threshold below which re-retrieval is triggered.
     MIN_CONTEXT_CONFIDENCE  = float(os.getenv("MIN_CONTEXT_CONFIDENCE", "0.65"))
     # When true, the agentic trace is attached to every /api/chat response.
-    DEBUG_AGENTIC_TRACE     = os.getenv("DEBUG_AGENTIC_TRACE", "true").lower() != "false"
+    DEBUG_AGENTIC_TRACE     = os.getenv("DEBUG_AGENTIC_TRACE", "false").lower() != "false"
 
     # System capabilities
     CAPABILITIES = {

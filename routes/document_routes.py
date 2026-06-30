@@ -32,13 +32,12 @@ def _load_images_meta(doc_dir: Path):
     return []
 
 def _safe_join(base: Path, *parts: str) -> Path:
-    """
-    Join parts under base and ensure the result stays inside base.
-    Allows nested paths like 'subdir/image.png' but forbids traversal.
-    """
+    """Join parts under base and ensure the result stays inside base."""
     final = base.joinpath(*parts).resolve()
     base_resolved = base.resolve()
-    if not str(final).startswith(str(base_resolved)):
+    try:
+        final.relative_to(base_resolved)
+    except ValueError:
         raise PermissionError("Path traversal detected")
     return final
 
@@ -130,7 +129,7 @@ def api_documents():
 
     except Exception as e:
         logger.error(f"Documents API error: {e}", exc_info=True)
-        return jsonify({'error': 'Failed to load documents', 'message': str(e)}), 500
+        return jsonify({'error': 'Failed to load documents'}), 500
 
 
 @document_bp.route('/load-documents', methods=['POST'])
@@ -214,8 +213,8 @@ def api_load_documents():
         return jsonify(response_data)
 
     except Exception as e:
-        logger.error(f"Error in api_load_documents: {str(e)}", exc_info=True)
-        return jsonify({'status': 'error', 'message': f'Failed to load documents: {str(e)}'}), 500
+        logger.error(f"Error in api_load_documents: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to load documents'}), 500
 
 
 
@@ -312,8 +311,8 @@ def api_load_all_documents():
         return jsonify(response_data)
 
     except Exception as e:
-        logger.error(f"Error in api_load_all_documents: {str(e)}", exc_info=True)
-        return jsonify({'status': 'error', 'message': f'Failed to load documents: {str(e)}'}), 500
+        logger.error(f"Error in api_load_all_documents: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to load documents'}), 500
 
 @document_bp.route('/get-image/<path:doc_name>/<path:relpath>', methods=['GET'])
 @require_login
@@ -349,7 +348,9 @@ def get_document_image(doc_name, relpath):
         target_path = (doc_images_dir / relpath).resolve()
 
         # Security: must stay inside the document's images directory
-        if not str(target_path).startswith(str(doc_images_dir) + os.sep):
+        try:
+            target_path.relative_to(doc_images_dir)
+        except ValueError:
             logger.warning(f"Traversal attempt: {target_path}")
             return jsonify({'error': 'Access denied'}), 403
 
@@ -362,15 +363,17 @@ def get_document_image(doc_name, relpath):
         logger.error(f"Error serving image: {e}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
+_UPLOAD_ALLOWED_EXTENSIONS = {'.pdf', '.pptx', '.ppt', '.docx', '.doc', '.txt', '.md', '.csv', '.xlsx'}
+_UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
 @document_bp.route('/documents/upload', methods=['POST'])
+@require_login
 def api_upload_document():
     """Upload and process a new document"""
     try:
         from app_state import get_system_state, app_config
         from unified_document_processor import MultiFormatDocumentProcessor
         from werkzeug.utils import secure_filename
-        import tempfile
-        import shutil
 
         system_initialized, _, doc_manager, _, _, _, _ = get_system_state()
         if not system_initialized:
@@ -378,35 +381,46 @@ def api_upload_document():
 
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
-        
+
         file = request.files['file']
-        if file.filename == '':
+        if not file.filename:
             return jsonify({'error': 'No selected file'}), 400
 
         filename = secure_filename(file.filename)
+        if not filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        ext = Path(filename).suffix.lower()
+        if ext not in _UPLOAD_ALLOWED_EXTENSIONS:
+            return jsonify({'error': f'File type not allowed. Permitted: {", ".join(_UPLOAD_ALLOWED_EXTENSIONS)}'}), 400
+
+        # Enforce size limit before writing to disk
+        data = file.read(_UPLOAD_MAX_BYTES + 1)
+        if len(data) > _UPLOAD_MAX_BYTES:
+            return jsonify({'error': 'File exceeds 50 MB limit'}), 413
+
+        # Magic-byte check for binary types
+        if ext == '.pdf' and not data.startswith(b'%PDF'):
+            return jsonify({'error': 'File content does not match declared type'}), 400
+        if ext in {'.docx', '.pptx', '.xlsx'} and not data.startswith(b'PK\x03\x04'):
+            return jsonify({'error': 'File content does not match declared type'}), 400
+
         data_dir = os.path.join(app_config.PROJECT_ROOT, "data")
         os.makedirs(data_dir, exist_ok=True)
-        
         file_path = os.path.join(data_dir, filename)
-        file.save(file_path)
+        with open(file_path, 'wb') as fh:
+            fh.write(data)
 
         # Process the document
         processor = MultiFormatDocumentProcessor()
         processor.process_file(file_path, app_config.EMBEDDINGS_DIR)
-        
+
         # Reload documents into memory
         if doc_manager:
             doc_manager.load_all_documents()
-            
-        # Give current user access to this document if needed (assuming public or global access for now)
-        user_designation = session.get('user_designation')
-        if user_designation:
-            # We would append it to access.csv here if we wanted strict permissions.
-            # For this simple implementation, if doc_manager sees it, we'll let it be accessible.
-            pass
 
         return jsonify({'status': 'success', 'message': f'File {filename} uploaded and processed.'})
 
     except Exception as e:
         logger.error(f"Error uploading document: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Upload failed. Please try again.'}), 500

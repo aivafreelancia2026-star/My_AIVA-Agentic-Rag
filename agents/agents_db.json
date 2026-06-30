@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "id": "aiva_cintext",
+    "name": "Aiva cintext",
+    "description": "Notebook: Aiva cintext",
+    "keywords": [
+      "aiva",
+      "cintext"
+    ],
+    "sources": [
+      {
+        "type": "file",
+        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\internship_company_rankings.xlsx"
+      },
+      {
+        "type": "file",
+        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\DEV DUO Hackathon.pdf"
+      },
+      {
+        "type": "file",
+        "value": "E:\\AIVA\\FSTARTUP AIVA Freelancia\\AIVA_RaG\\agent_uploads\\aiva_cintext\\Poojitha_Resume.docx"
+      }
+    ],
+    "enabled": true,
+    "refresh_hours": 24,
+    "created_at": "2026-06-29T11:54:14.679050",
+    "last_indexed": "2026-06-29T11:54:57.079938"
+  }
+]

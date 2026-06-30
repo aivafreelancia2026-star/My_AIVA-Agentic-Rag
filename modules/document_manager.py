@@ -11,6 +11,30 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _safe_faiss_load(faiss_cls, folder_path: str, embedding_model, trusted_base: str):
+    """Load a FAISS index only if the index path is inside a trusted base directory.
+
+    FAISS indexes are stored as pickle files. Loading an index from an untrusted
+    or attacker-controlled path enables arbitrary code execution. This guard ensures
+    the path has been resolved inside a directory that only the application's own
+    indexing pipeline writes to.
+    """
+    resolved = Path(folder_path).resolve()
+    trusted = Path(trusted_base).resolve()
+    try:
+        resolved.relative_to(trusted)
+    except ValueError:
+        raise PermissionError(
+            f"Refusing to load FAISS index from '{resolved}' — "
+            f"path is outside trusted embeddings directory '{trusted}'."
+        )
+    return faiss_cls.load_local(
+        str(resolved),
+        embedding_model,
+        allow_dangerous_deserialization=True,
+    )
+
+
 class AdvancedDocumentManager:
     """Document manager for handling document loading and search"""
     def __init__(self, embeddings_dir, embedding_model=None, load_on_init=False):
@@ -82,12 +106,8 @@ class AdvancedDocumentManager:
             metadata = {'author': 'Unknown', 'title': 'Unknown', 'total_pages': 0}
             stats = {'chunks': 0, 'images': 0, 'tables': 0}
             
-            # Load the FAISS index
-            db = FAISS.load_local(
-                folder_path,
-                self.embedding_model,
-                allow_dangerous_deserialization=True
-            )
+            # Load the FAISS index — path is validated against the trusted embeddings dir
+            db = _safe_faiss_load(FAISS, folder_path, self.embedding_model, self.embeddings_dir)
             print(f"    ✅ Loaded FAISS database successfully")
             
             # Load metadata file if it exists

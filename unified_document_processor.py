@@ -180,11 +180,16 @@ except ImportError:
 
 
 
-# Excel processing removed - only PDF and PPT supported
+# Excel processing
+try:
+    import openpyxl
+    HAS_EXCEL = True
+except ImportError:
+    HAS_EXCEL = False
+    print("Warning: openpyxl not available - Excel processing disabled")
 
-HAS_EXCEL = False
-
-
+# CSV/text processing (always available via stdlib)
+HAS_TEXT = True
 
 # XML processing removed - only PDF and PPT supported
 
@@ -832,9 +837,13 @@ class FileTypeDetector:
         # Text documents
 
         'pdf': ['.pdf'],
-        'docx': ['.docx'],
+        'docx': ['.docx', '.doc'],
 
-        
+        # Plain text / markup
+        'text': ['.txt', '.md', '.csv'],
+
+        # Spreadsheets
+        'xlsx': ['.xlsx', '.xls'],
 
         # Presentations
 
@@ -902,7 +911,21 @@ class FileTypeDetector:
 
             'application/pdf': ('pdf', 'pdf'),
 
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation': ('pptx', 'pptx')
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': ('pptx', 'pptx'),
+
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ('docx', 'docx'),
+
+            'application/msword': ('docx', 'doc'),
+
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('xlsx', 'xlsx'),
+
+            'application/vnd.ms-excel': ('xlsx', 'xls'),
+
+            'text/plain': ('text', 'txt'),
+
+            'text/csv': ('text', 'csv'),
+
+            'text/markdown': ('text', 'md'),
 
         }
 
@@ -3676,6 +3699,106 @@ class WordProcessor:
             raise Exception(f"Word processing failed: {e}")
 
 
+# ---------- TEXT / CSV PROCESSOR ----------
+
+class TextProcessor:
+    """Process plain text, markdown, and CSV files"""
+
+    @staticmethod
+    def process(file_path: str, output_dir: str = None) -> ProcessedDocument:
+        start_time = time.time()
+        file_path_obj = Path(file_path)
+        ext = file_path_obj.suffix.lower()
+
+        try:
+            raw = file_path_obj.read_text(encoding='utf-8', errors='replace')
+
+            if ext == '.csv':
+                import csv as csv_mod
+                import io
+                reader = csv_mod.reader(io.StringIO(raw))
+                rows = list(reader)
+                lines = [" | ".join(r) for r in rows if any(c.strip() for c in r)]
+                content = "\n".join(lines)
+                doc_type = 'csv'
+            else:
+                content = raw
+                doc_type = ext.lstrip('.')
+
+            metadata = {
+                'title': file_path_obj.stem,
+                'author': 'Unknown',
+                'word_count': len(content.split()),
+                'char_count': len(content),
+                'file_type': doc_type,
+                'creation_date': datetime.fromtimestamp(file_path_obj.stat().st_ctime).isoformat()
+            }
+
+            return ProcessedDocument(
+                content=content,
+                metadata=metadata,
+                doc_type=doc_type,
+                file_path=str(file_path_obj),
+                processing_time=time.time() - start_time
+            )
+
+        except Exception as e:
+            raise Exception(f"Text processing failed for {file_path}: {e}")
+
+
+# ---------- EXCEL PROCESSOR ----------
+
+class ExcelProcessor:
+    """Process Excel spreadsheets (.xlsx, .xls)"""
+
+    @staticmethod
+    def process(file_path: str, output_dir: str = None) -> ProcessedDocument:
+        if not HAS_EXCEL:
+            raise ImportError("openpyxl is not installed. Install it with: pip install openpyxl")
+
+        start_time = time.time()
+        file_path_obj = Path(file_path)
+
+        try:
+            wb = openpyxl.load_workbook(str(file_path_obj), read_only=True, data_only=True)
+            content_parts = []
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                content_parts.append(f"\n[SHEET: {sheet_name}]")
+                rows_text = []
+                for row in ws.iter_rows(values_only=True):
+                    cells = [str(c) if c is not None else '' for c in row]
+                    if any(c.strip() for c in cells):
+                        rows_text.append(" | ".join(cells))
+                if rows_text:
+                    content_parts.append("\n".join(rows_text))
+
+            wb.close()
+            content = "\n".join(content_parts)
+
+            metadata = {
+                'title': file_path_obj.stem,
+                'author': 'Unknown',
+                'word_count': len(content.split()),
+                'char_count': len(content),
+                'file_type': 'xlsx',
+                'sheet_count': len(wb.sheetnames),
+                'creation_date': datetime.fromtimestamp(file_path_obj.stat().st_ctime).isoformat()
+            }
+
+            return ProcessedDocument(
+                content=content,
+                metadata=metadata,
+                doc_type='xlsx',
+                file_path=str(file_path_obj),
+                processing_time=time.time() - start_time
+            )
+
+        except Exception as e:
+            raise Exception(f"Excel processing failed for {file_path}: {e}")
+
+
 # ---------- MAIN MULTI-FORMAT PROCESSOR ----------
 
 
@@ -3693,7 +3816,14 @@ class MultiFormatDocumentProcessor:
             'pdf': PDFProcessor,
             'pptx': PowerPointProcessor,
             'ppt': PowerPointProcessor,
-            'docx': WordProcessor
+            'docx': WordProcessor,
+            'doc': WordProcessor,
+            'text': TextProcessor,
+            'txt': TextProcessor,
+            'csv': TextProcessor,
+            'md': TextProcessor,
+            'xlsx': ExcelProcessor,
+            'xls': ExcelProcessor,
 
         }
 
