@@ -718,47 +718,29 @@
           const res = await fetch("/api/access-data");
           const data = await res.json();
           if (res.ok) {
-            this.accessData = data.access_data;
+            this.designations = data.designations || [];
             this.populateSelect();
           } else {
-            this.showError("Failed to load access data: " + data.message);
+            this.showError("Failed to load access data: " + (data.error || data.message || "Unknown error"));
           }
-        } catch {
+        } catch(err) {
           this.showError("Failed to connect to server. Please try again.");
         }
       }
 
       populateSelect() {
         this.select.innerHTML = "<option value=''>Choose your designation…</option>";
-        Object.keys(this.accessData).forEach(d => {
+        (this.designations || []).forEach(d => {
           const opt = document.createElement("option");
           opt.value = d;
-          opt.textContent = d.replace(/([A-Z])/g," $1").replace(/^./,s=>s.toUpperCase()).replace(/\b\w/g,l=>l.toUpperCase()).trim();
+          opt.textContent = d;
           this.select.appendChild(opt);
         });
       }
 
       handleChange(e) {
         this.selectedDesignation = e.target.value;
-        if (this.selectedDesignation && this.accessData[this.selectedDesignation]) {
-          this.showPreview(this.selectedDesignation);
-        } else {
-          this.preview.style.display = "none";
-        }
-      }
-
-      showPreview(d) {
-        const access = this.accessData[d];
-        if (!access) return;
-        const allowed = Object.keys(access).filter(k => access[k] === 1);
-        if (allowed.length === 0) {
-          this.accessList.innerHTML = "<span class='no-access'>No document access granted</span>";
-        } else {
-          this.accessList.innerHTML = allowed.map(doc =>
-            `<span class="access-tag">${doc.replace(/_/g," ").replace(/\b\w/g,l=>l.toUpperCase())}</span>`
-          ).join("");
-        }
-        this.preview.style.display = "block";
+        this.preview.style.display = "none";
       }
 
       async handleLogin(e) {

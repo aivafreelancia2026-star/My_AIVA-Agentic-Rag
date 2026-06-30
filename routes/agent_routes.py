@@ -281,6 +281,87 @@ def upload_source_file(agent_id):
     })
 
 
+# ── Source file read / save ───────────────────────────────────────────────────
+
+@agent_bp.route("/<agent_id>/sources/<int:src_idx>/read", methods=["GET"])
+@require_login
+def read_source_file(agent_id, src_idx):
+    """Read the content of an agent source file for in-place editing."""
+    agent = get_agent(agent_id)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    sources = agent.get("sources", [])
+    if src_idx < 0 or src_idx >= len(sources):
+        return jsonify({"error": "Source index out of range"}), 400
+    src = sources[src_idx]
+    if src.get("type") != "file":
+        return jsonify({"error": "Source is not a file"}), 400
+
+    from pathlib import Path as _Path
+    import agents.file_editing_agent as fa
+
+    abs_path = _Path(src["value"]).resolve()
+    allowed  = fa._get_allowed_root()
+    try:
+        abs_path.relative_to(allowed)
+    except ValueError:
+        return jsonify({"error": "Path outside allowed root"}), 403
+
+    rel_path = str(abs_path.relative_to(allowed))
+    result   = fa.read_file_content(rel_path)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@agent_bp.route("/<agent_id>/sources/<int:src_idx>/save", methods=["POST"])
+@require_login
+def save_source_file(agent_id, src_idx):
+    """Save edited content back to an agent source file and re-index."""
+    agent = get_agent(agent_id)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    sources = agent.get("sources", [])
+    if src_idx < 0 or src_idx >= len(sources):
+        return jsonify({"error": "Source index out of range"}), 400
+    src = sources[src_idx]
+    if src.get("type") != "file":
+        return jsonify({"error": "Source is not a file"}), 400
+
+    from pathlib import Path as _Path
+    import agents.file_editing_agent as fa
+
+    abs_path = _Path(src["value"]).resolve()
+    allowed  = fa._get_allowed_root()
+    try:
+        abs_path.relative_to(allowed)
+    except ValueError:
+        return jsonify({"error": "Path outside allowed root"}), 403
+
+    rel_path = str(abs_path.relative_to(allowed))
+    data     = request.get_json() or {}
+    suffix   = abs_path.suffix.lower()
+
+    if suffix == ".docx":
+        result = fa.save_docx_file(rel_path, data.get("paragraphs", []), confirmed=True)
+    elif suffix in {".txt", ".md"}:
+        result = fa.save_text_file(rel_path, data.get("content", ""), confirmed=True)
+    elif suffix == ".csv":
+        result = fa.save_csv_file(rel_path, data.get("rows", []), confirmed=True)
+    else:
+        return jsonify({"error": f"Editing not supported for {suffix}"}), 400
+
+    if not result.get("success"):
+        return jsonify(result), 400
+
+    # Re-index this agent after saving
+    mgr = get_agent_manager()
+    if mgr:
+        mgr.ensure_indexed(agent_id, force=True)
+
+    return jsonify({"success": True, "message": "Saved and re-indexing started."})
+
+
 # ── Debug routing ─────────────────────────────────────────────────────────────
 
 @agent_bp.route("/debug/route", methods=["POST"])

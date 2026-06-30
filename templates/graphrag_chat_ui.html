@@ -818,6 +818,26 @@
       border-radius: 8px;
       font-weight: 600;
     }
+    .src-card-actions {
+      display: none;
+      gap: 4px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .src-card:hover .src-card-actions { display: flex; }
+    .src-act-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 2px 6px;
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s;
+      line-height: 1.4;
+    }
+    .src-act-btn:hover { border-color: #C8CAD6; color: var(--text); }
+    .src-act-btn.danger:hover { border-color: #f87171; color: #f87171; }
     .badge-indexed  { background: var(--badge-indexed-bg);  color: var(--badge-indexed-txt); }
     .badge-indexing { background: var(--badge-indexing-bg); color: var(--badge-indexing-txt); }
     .badge-failed   { background: var(--badge-failed-bg);   color: var(--badge-failed-txt); }
@@ -1288,6 +1308,7 @@ function renderRight() {
     const badge  = `<span class="src-card-badge ${binfo.cls}">${binfo.label}</span>`;
     const isChecked = !deselectedFiles.has(name) ? 'checked' : '';
 
+    const safeIdx = sources.indexOf(s);
     html += `
       <div class="src-card" style="display: flex; align-items: center; gap: 8px;">
         <input type="checkbox" class="src-checkbox" data-name="${esc(name)}" ${isChecked} onchange="toggleFileSelection(this)" style="cursor: pointer; width: 15px; height: 15px; accent-color: #00C070; margin-left: 4px; flex-shrink: 0;">
@@ -1295,6 +1316,11 @@ function renderRight() {
         <div class="src-card-info" style="flex: 1; min-width: 0;">
           <div class="src-card-name" title="${esc(name)}">${esc(name.length > 24 ? name.slice(0,24)+'…' : name)}</div>
           <div class="src-card-meta">${ext} &nbsp;${badge}</div>
+        </div>
+        <div class="src-card-actions">
+          ${isFile && /\.(docx|txt|md|csv)$/i.test(name) ? `<button class="src-act-btn" title="Edit file" onclick="openSourceEditor('${activeNbId}',${safeIdx},event)">✏️ Edit</button>` : ''}
+          ${isFile ? `<button class="src-act-btn" title="Replace file" onclick="replaceSource('${activeNbId}',${safeIdx},event)">↺ Replace</button>` : ''}
+          <button class="src-act-btn danger" title="Remove source" onclick="removeSource('${activeNbId}',${safeIdx},event)">✕</button>
         </div>
       </div>`;
   });
@@ -1327,6 +1353,67 @@ function toggleFileSelection(checkbox) {
   } else {
     deselectedFiles.add(name);
   }
+}
+
+async function removeSource(nbId, idx, e) {
+  e && e.stopPropagation();
+  const nb = notebooks.find(n => n.id === nbId);
+  if (!nb || !nb.sources) return;
+  const src = nb.sources[idx];
+  if (!src) return;
+  const name = src.type === 'file' ? basename(src.value) : src.value;
+  if (!confirm(`Remove "${name}" from this notebook?`)) return;
+  const newSources = nb.sources.filter((_, i) => i !== idx);
+  try {
+    const r = await fetch(`/api/agents/${nbId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources: newSources }),
+    });
+    if (!r.ok) throw new Error('Failed to remove source');
+    deselectedFiles.delete(name);
+    toast(`🗑️ Removed: ${name}`);
+    await loadNotebooks();
+    if (activeNbId === nbId) renderRight();
+  } catch(err) {
+    toast('❌ ' + err.message);
+  }
+}
+
+// Hidden file input for replacing a source
+let _replaceNbId = null, _replaceIdx = null;
+(function() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.id = 'replaceFileInput'; inp.style.display = 'none';
+  inp.accept = '.pdf,.pptx,.docx,.doc,.txt,.md,.csv,.xlsx,.xls';
+  inp.onchange = async function() {
+    const file = inp.files[0];
+    if (!file || _replaceNbId === null || _replaceIdx === null) return;
+    const nb = notebooks.find(n => n.id === _replaceNbId);
+    if (!nb) return;
+    toast('⏳ Uploading replacement…');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`/api/agents/${_replaceNbId}/upload-source`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Upload failed');
+      toast('✅ Source replaced: ' + file.name);
+      await loadNotebooks();
+      if (activeNbId === _replaceNbId) renderRight();
+    } catch(err) {
+      toast('❌ ' + err.message);
+    }
+    inp.value = '';
+  };
+  document.body.appendChild(inp);
+})();
+
+function replaceSource(nbId, idx, e) {
+  e && e.stopPropagation();
+  _replaceNbId = nbId;
+  _replaceIdx  = idx;
+  document.getElementById('replaceFileInput').click();
 }
 
 // ─────────────────────────────────────────────
@@ -1706,5 +1793,177 @@ async function pollIndexStatus() {
 // ─────────────────────────────────────────────
 loadNotebooks().then(pollIndexStatus);
 </script>
+
+<!-- ── Source File Editor Modal ─────────────────────────────── -->
+<style>
+  .src-editor-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+    z-index: 2000; align-items: center; justify-content: center;
+  }
+  .src-editor-overlay.open { display: flex; }
+  .src-editor-box {
+    background: var(--main-bg, #0f1117);
+    border: 1px solid var(--border, #2a2d3a);
+    border-radius: 14px;
+    width: 720px; max-width: 96vw;
+    max-height: 88vh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .src-editor-head {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border, #2a2d3a);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .src-editor-head span { flex: 1; font-size: 13px; font-weight: 600; color: var(--text, #e0e4ef); word-break: break-all; }
+  .src-editor-close {
+    background: none; border: none; font-size: 18px;
+    color: var(--muted, #6b7a99); cursor: pointer; line-height: 1;
+  }
+  .src-editor-close:hover { color: var(--text, #e0e4ef); }
+  .src-editor-body { flex: 1; overflow-y: auto; padding: 14px 18px; }
+  .src-editor-textarea {
+    width: 100%; min-height: 380px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border, #2a2d3a);
+    border-radius: 8px; padding: 12px;
+    color: var(--text, #e0e4ef); font-size: 13px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6; resize: vertical; outline: none;
+  }
+  .src-editor-textarea:focus { border-color: #00C070; }
+  .src-editor-foot {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border, #2a2d3a);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .src-editor-msg { flex: 1; font-size: 12px; }
+  .src-editor-msg.ok  { color: #00C070; }
+  .src-editor-msg.err { color: #f87171; }
+  .src-editor-save {
+    padding: 7px 18px; border-radius: 7px; border: none;
+    background: #00C070; color: #0a1628;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .src-editor-save:disabled { opacity: .45; cursor: not-allowed; }
+  .src-editor-cancel {
+    padding: 7px 14px; border-radius: 7px;
+    border: 1px solid var(--border, #2a2d3a);
+    background: none; color: var(--muted, #6b7a99);
+    font-size: 13px; cursor: pointer;
+  }
+  .src-editor-cancel:hover { color: var(--text, #e0e4ef); }
+</style>
+
+<div class="src-editor-overlay" id="srcEditorOverlay">
+  <div class="src-editor-box">
+    <div class="src-editor-head">
+      <span id="srcEditorTitle">Edit File</span>
+      <button class="src-editor-close" onclick="closeSrcEditor()">×</button>
+    </div>
+    <div class="src-editor-body">
+      <textarea class="src-editor-textarea" id="srcEditorArea" placeholder="Loading…" spellcheck="false"></textarea>
+    </div>
+    <div class="src-editor-foot">
+      <span class="src-editor-msg" id="srcEditorMsg"></span>
+      <button class="src-editor-cancel" onclick="closeSrcEditor()">Cancel</button>
+      <button class="src-editor-save" id="srcEditorSaveBtn" onclick="saveSrcEdit()">💾 Save &amp; Re-index</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _editNbId = null, _editSrcIdx = null, _editType = null, _editParagraphs = null;
+
+async function openSourceEditor(nbId, idx, e) {
+  e && e.stopPropagation();
+  _editNbId = nbId; _editSrcIdx = idx;
+  const area  = document.getElementById('srcEditorArea');
+  const title = document.getElementById('srcEditorTitle');
+  const msg   = document.getElementById('srcEditorMsg');
+  const btn   = document.getElementById('srcEditorSaveBtn');
+  area.value = 'Loading…'; area.disabled = true;
+  btn.disabled = true; msg.textContent = ''; msg.className = 'src-editor-msg';
+
+  const nb = notebooks.find(n => n.id === nbId);
+  const src = nb?.sources?.[idx];
+  title.textContent = src ? '✏️  ' + (src.value.split(/[\\/]/).pop()) : 'Edit File';
+
+  document.getElementById('srcEditorOverlay').classList.add('open');
+
+  try {
+    const r = await fetch(`/api/agents/${nbId}/sources/${idx}/read`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+
+    _editType = d.type;
+    if (d.type === 'docx') {
+      _editParagraphs = d.paragraphs;
+      area.value = d.paragraphs.map(p => p.text).join('\n');
+    } else if (d.type === 'text') {
+      area.value = d.content;
+    } else if (d.type === 'csv') {
+      area.value = d.rows.map(r => r.join(',')).join('\n');
+    } else {
+      throw new Error(`Editing not supported for type: ${d.type}`);
+    }
+    area.disabled = false; btn.disabled = false;
+  } catch(err) {
+    area.value = ''; area.disabled = true;
+    msg.textContent = '⚠️ ' + err.message; msg.className = 'src-editor-msg err';
+  }
+}
+
+function closeSrcEditor() {
+  document.getElementById('srcEditorOverlay').classList.remove('open');
+  _editNbId = null; _editSrcIdx = null; _editType = null; _editParagraphs = null;
+}
+
+async function saveSrcEdit() {
+  const area = document.getElementById('srcEditorArea');
+  const msg  = document.getElementById('srcEditorMsg');
+  const btn  = document.getElementById('srcEditorSaveBtn');
+  btn.disabled = true; msg.textContent = 'Saving…'; msg.className = 'src-editor-msg';
+
+  let body;
+  if (_editType === 'docx') {
+    const lines = area.value.split('\n');
+    const paragraphs = lines.map((t, i) => ({
+      text: t,
+      style: (_editParagraphs?.[i]?.style) || 'Normal'
+    }));
+    body = { paragraphs };
+  } else if (_editType === 'text') {
+    body = { content: area.value };
+  } else if (_editType === 'csv') {
+    body = { rows: area.value.split('\n').map(r => r.split(',')) };
+  }
+
+  try {
+    const r = await fetch(`/api/agents/${_editNbId}/sources/${_editSrcIdx}/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Save failed');
+    msg.textContent = '✅ Saved — re-indexing in background'; msg.className = 'src-editor-msg ok';
+    toast('✅ File saved and re-indexing started');
+    setTimeout(closeSrcEditor, 1400);
+    await loadNotebooks();
+  } catch(err) {
+    msg.textContent = '❌ ' + err.message; msg.className = 'src-editor-msg err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('srcEditorOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeSrcEditor();
+});
+</script>
+
 </body>
 </html>
